@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feature/**
+
+jobs:
+  test:
+    runs-on: arc-runners
+    env:
+      CGO_ENABLED: 0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+      - name: Run Prettier check
+        run: npx --yes prettier --check "*.md"
+      - name: Run tests
+        run: go test ./...
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          args: --timeout=5m
+
+  # Cross-compile check: every target script/build.sh publishes.
+  # Keep this list in sync with script/build.sh (source of truth).
+  cross-compile:
+    runs-on: arc-runners
+    env:
+      CGO_ENABLED: 0
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Cross-compile every published target
+        run: |
+          set -euo pipefail
+          # Keep in sync with script/build.sh (source of truth).
+          for pair in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64; do
+            echo "==> $pair"
+            GOOS="${pair%%/*}" GOARCH="${pair##*/}" go build ./...
+          done
