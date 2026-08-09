@@ -153,3 +153,6 @@ on a tag push (`v*`).
 ## License
 
 MIT. See [LICENSE](LICENSE).
+## Smoke-test fixture
+
+This is a change used only to smoke-test `gh pr-banner` end-to-end.
