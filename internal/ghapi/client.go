@@ -81,42 +81,61 @@ func runInput(stdin []byte, args ...string) ([]byte, error) {
 }
 
 // ResolveRepo turns a possibly-empty `-R OWNER/REPO` argument and the working
-// directory into (owner, repo). When repoArg is empty it asks gh for the repo
-// containing the current directory.
-func ResolveRepo(repoArg string) (string, string, error) {
+// directory into (owner, repo, explicit). explicit is true when the caller
+// supplied -R, false when owner/repo was inferred from the current directory.
+func ResolveRepo(repoArg string) (owner, repo string, explicit bool, err error) {
 	if repoArg != "" {
 		parts := strings.SplitN(repoArg, "/", 3)
 		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-			return "", "", fmt.Errorf("invalid --repo %q: want OWNER/REPO", repoArg)
+			return "", "", true, fmt.Errorf("invalid --repo %q: want OWNER/REPO", repoArg)
 		}
-		return parts[0], parts[1], nil
+		return parts[0], parts[1], true, nil
 	}
 	out, err := run("repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner")
 	if err != nil {
-		return "", "", fmt.Errorf("detect repository: %w", err)
+		return "", "", false, fmt.Errorf("detect repository: %w", err)
 	}
-	owner, repo, e := splitNameWithOwner(strings.TrimSpace(string(out)))
+	eowner, erepo, e := splitNameWithOwner(strings.TrimSpace(string(out)))
 	if e != nil {
-		return "", "", fmt.Errorf("detect repository: %w", e)
+		return "", "", false, fmt.Errorf("detect repository: %w", e)
 	}
-	return owner, repo, nil
+	return eowner, erepo, false, nil
 }
 
 // ResolvePRNumber returns the PR/issue number: the given number when non-zero,
-// otherwise the number of the PR open for the current branch in owner/repo.
-func ResolvePRNumber(owner, repo string, number int) (int, error) {
+// otherwise the number of the PR open for the current branch. When the repo was
+// supplied explicitly (-R), `gh pr view` needs the branch name as a selector,
+// because -R disconnects it from local branch inference.
+func ResolvePRNumber(owner, repo string, explicitRepo bool, number int) (int, error) {
 	if number > 0 {
 		return number, nil
 	}
-	out, err := run("pr", "view", "-R", owner+"/"+repo, "--json", "number", "--jq", ".number")
+	branch, err := gitBranch()
 	if err != nil {
-		return 0, fmt.Errorf("no --pr given and no PR for the current branch in %s/%s: %w", owner, repo, err)
+		return 0, fmt.Errorf("no --pr given and cannot determine the current branch: %w (pass --pr NUMBER)", err)
+	}
+	args := []string{"pr", "view", branch, "--json", "number", "--jq", ".number"}
+	if explicitRepo {
+		args = append(args, "-R", owner+"/"+repo)
+	}
+	out, err := run(args...)
+	if err != nil {
+		return 0, fmt.Errorf("no PR for branch %q in %s/%s: %w (pass --pr NUMBER)", branch, owner, repo, err)
 	}
 	n, cerr := strconv.Atoi(strings.TrimSpace(string(out)))
 	if cerr != nil {
 		return 0, fmt.Errorf("parse PR number %q: %w", strings.TrimSpace(string(out)), cerr)
 	}
 	return n, nil
+}
+
+// gitBranch returns the current branch name of the working directory.
+func gitBranch() (string, error) {
+	out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // GetIssue fetches the issue/PR document for owner/repo#number.

@@ -42,6 +42,8 @@ func newClearCommand(o *commonOptions) *cobra.Command {
 					return err
 				}
 				res.Wrote = true
+			} else if o.dryRun {
+				res.Body = out.Body
 			}
 			o.emit(res)
 			return nil

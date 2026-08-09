@@ -54,8 +54,9 @@ type result struct {
 	URL     string        `json:"url"`
 	Present bool          `json:"present"`
 	Banner  string        `json:"banner,omitempty"`
-	DryRun  bool          `json:"dry_run"`
-	Wrote   bool          `json:"wrote"`
+	Body    string        `json:"body,omitempty"`
+	DryRun  bool          `json:"dry_run,omitempty"`
+	Wrote   bool          `json:"wrote,omitempty"`
 	Names   []string      `json:"names,omitempty"`
 }
 
@@ -90,11 +91,11 @@ func newRootCommand() *cobra.Command {
 	addCommonFlags(root, o)
 	// PersistentPreRunE resolves the target once; it runs before the subcommand.
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
-		owner, repo, err := ghapi.ResolveRepo(o.repo)
+		owner, repo, explicitRepo, err := ghapi.ResolveRepo(o.repo)
 		if err != nil {
 			return err
 		}
-		number, err := ghapi.ResolvePRNumber(owner, repo, o.pr)
+		number, err := ghapi.ResolvePRNumber(owner, repo, explicitRepo, o.pr)
 		if err != nil {
 			return err
 		}

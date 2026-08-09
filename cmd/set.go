@@ -53,7 +53,8 @@ func newSetCommand(o *commonOptions) *cobra.Command {
 			}
 			if out.Action != banner.ActionUnchanged {
 				if o.dryRun {
-					// Nothing written; the region is already correct on GitHub.
+					// Nothing written; carry the would-be body for preview.
+					res.Body = out.Body
 					o.emit(res)
 				} else {
 					if err := o.write(true, name, content, out.Body); err != nil {

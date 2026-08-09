@@ -32,25 +32,35 @@ func newGetCommand(o *commonOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res := result{
-				Action:  banner.ActionUnchanged,
-				Name:    name,
-				Repo:    o.owner + "/" + o.repoName,
-				PR:      o.number,
-				URL:     o.url,
-				Present: present,
-				Banner:  content,
+			if present {
+				if o.json {
+					o.emit(result{
+						Action:  "get",
+						Name:    name,
+						Repo:    o.owner + "/" + o.repoName,
+						PR:      o.number,
+						URL:     o.url,
+						Present: true,
+						Banner:  content,
+					})
+				} else {
+					fmt.Println(content)
+				}
+				return nil
 			}
-			if !present {
-				o.emit(res)
-				return absent()
-			}
+			// Absent: print nothing to stdout (the exit code is the signal). JSON
+			// callers still get the state object.
 			if o.json {
-				o.emit(res)
-			} else {
-				fmt.Println(content)
+				o.emit(result{
+					Action:  "get",
+					Name:    name,
+					Repo:    o.owner + "/" + o.repoName,
+					PR:      o.number,
+					URL:     o.url,
+					Present: false,
+				})
 			}
-			return nil
+			return absent()
 		},
 	}
 }
