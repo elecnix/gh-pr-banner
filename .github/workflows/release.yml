@@ -13,7 +13,10 @@ permissions:
 
 jobs:
   release:
-    runs-on: arc-runners
+    # See the note in ci.yml: this public extension can't reach the self-hosted
+    # `arc-runners` label (per-repo ARC install), so it runs on ubuntu-latest,
+    # which also ships gh preinstalled — the install step below short-circuits.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - name: Install gh CLI

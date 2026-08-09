@@ -69,10 +69,12 @@ cutting a release. Rules that matter:
    Expect five assets built by `script/build.sh` via
    `cli/gh-extension-precompile`.
 
-CI and releases run on **`arc-runners`** (self-hosted), not `ubuntu-latest`.
-The image is minimal: no `gh`, no `wget`. Any step installing tooling must
-`set -euo pipefail`. Follow the official
-[gh install instructions for Debian/Ubuntu](https://github.com/cli/cli/blob/trunk/docs/install_linux.md#debian-ubuntu-linux-apt).
+CI and releases run on **`ubuntu-latest`**. This is a deliberate deviation from the
+sibling extension repos, which run on the self-hosted **`arc-runners`** label: the
+ARC GitHub App is installed per-repo and does not cover a freshly created repo, so
+jobs would hang queued forever. If a runner is ever registered for this repo, remate
+the workflows to `arc-runners` to match. For release-time tooling, `ubuntu-latest`
+ships `gh` preinstalled, so the install step in `release.yml` short-circuits.
 
 ## Pull requests
 

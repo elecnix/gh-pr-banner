@@ -9,7 +9,11 @@ on:
 
 jobs:
   test:
-    runs-on: arc-runners
+    # NOTE: sibling extension repos use the self-hosted `arc-runners` label,
+    # but the ARC GitHub App is installed per-repo and does not cover a freshly
+    # created repo, so jobs there hang queued forever. This public extension
+    # uses ubuntu-latest until a runner is registered for this repo.
+    runs-on: ubuntu-latest
     env:
       CGO_ENABLED: 0
     steps:
@@ -33,7 +37,7 @@ jobs:
   # Cross-compile check: every target script/build.sh publishes.
   # Keep this list in sync with script/build.sh (source of truth).
   cross-compile:
-    runs-on: arc-runners
+    runs-on: ubuntu-latest
     env:
       CGO_ENABLED: 0
     steps:
