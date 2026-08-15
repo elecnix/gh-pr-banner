@@ -1,5 +1,7 @@
 # gh pr-banner
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/elecnix/gh-pr-banner)
+
 A deterministic `gh` extension that sets, updates, clears, and inspects
 **banner regions** in a pull request body — without ever regenerating the body.
 
