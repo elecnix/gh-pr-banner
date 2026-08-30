@@ -55,6 +55,7 @@ type result struct {
 	Present bool          `json:"present"`
 	Banner  string        `json:"banner,omitempty"`
 	Body    string        `json:"body,omitempty"`
+	SHA     string        `json:"sha,omitempty"`
 	DryRun  bool          `json:"dry_run,omitempty"`
 	Wrote   bool          `json:"wrote,omitempty"`
 	Names   []string      `json:"names,omitempty"`
@@ -108,6 +109,7 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(newGetCommand(o))
 	root.AddCommand(newPresentCommand(o))
 	root.AddCommand(newListCommand(o))
+	root.AddCommand(newTLDRCommand(o))
 	return root
 }
 
