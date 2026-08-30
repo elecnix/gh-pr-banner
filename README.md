@@ -189,7 +189,7 @@ script/build.sh          # build the published binaries
 CI (`.github/workflows/ci.yml`) runs tests, `golangci-lint`, a prettier check on
 markdown, and a cross-compile check of every published target. Releases are
 built by [gh-extension-precompile](https://github.com/cli/gh-extension-precompile)
-on a tag push (`v*`).
+when a release is published.
 
 ## License
 

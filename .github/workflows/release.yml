@@ -1,9 +1,11 @@
 name: release
 
 on:
-  push:
-    tags:
-      - "v*"
+  # Release publish only. Do not also trigger on `push: tags`: `gh release
+  # create` pushes the tag and publishes the release, so both triggers fire
+  # in the same second and the two runs race on asset upload (the loser dies
+  # with HTTP 422 "ReleaseAsset.name already exists"), leaving the release
+  # missing binaries. See #5.
   release:
     types: [published]
   workflow_dispatch:
