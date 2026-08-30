@@ -64,6 +64,45 @@ gh pr-banner list --pr 42
 Multiple separately-named banners can coexist in one body — `do-not-merge`,
 `needs-code-owner`, `build-report` — and each is set/cleared independently.
 
+### The `tldr` banner kind
+
+The `tldr` subcommand manages a reserved banner kind that pairs an
+**author-written summary** — one or two sentences saying what a pull request
+ships and why it matters — with the **head SHA it describes**:
+
+```sh
+# Stamp the summary and the SHA it describes.
+gh pr-banner tldr set --sha 1a2b3c4 --body "fixes the flaky retry loop" --pr 42
+
+# Read it back (exit 0 if present, 2 if absent).
+gh pr-banner tldr get --pr 42
+gh pr-banner tldr get --pr 42 --json   # {"banner": "...", "sha": "...", ...}
+```
+
+The banner region looks like this in the body:
+
+```md
+<!-- gh-pr-banner:tldr -->
+
+tldr-head-sha: 1a2b3c4
+fixes the flaky retry loop
+
+<!-- /gh-pr-banner:tldr -->
+```
+
+Design rules, all deliberate:
+
+- **The SHA is stored, never enforced.** The banner carries it; freshness is
+  computed by whoever reads the banner (for example, comparing changed-file
+  sets of the stamped SHA against the current head, and rendering the summary
+  marked stale when they differ). A head that moved with an identical file set
+  (rebase, fixup) is still fresh. Nothing here blocks a merge — a tldr is
+  never a gate or a check.
+- **Never generated from the diff.** The summary is always written by a human;
+  the command has no fallback that synthesizes one.
+- **Clearing is shared with the generic commands.** `gh pr-banner clear tldr`
+  and `gh pr-banner present tldr` work on the same region.
+
 ### Flags
 
 | Flag                    | Meaning                                                        |
