@@ -46,7 +46,6 @@ func newTLDRSetCommand(o *commonOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			content := banner.TLDRContent(sha, text)
 			at, err := o.placement()
 			if err != nil {
 				return err
@@ -55,7 +54,7 @@ func newTLDRSetCommand(o *commonOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			out, err := banner.Apply(is.Body, banner.TLDRName, content, banner.OpSet, at)
+			out, err := banner.TLDRApply(is.Body, sha, text, banner.OpSet, at)
 			if err != nil {
 				return err
 			}
@@ -75,7 +74,7 @@ func newTLDRSetCommand(o *commonOptions) *cobra.Command {
 					res.Body = out.Body
 					o.emit(res)
 				} else {
-					if err := o.write(true, banner.TLDRName, content, out.Body); err != nil {
+					if err := o.write(true, banner.TLDRName, out.Banner, out.Body); err != nil {
 						return err
 					}
 					res.Wrote = true
@@ -107,7 +106,7 @@ func newTLDRGetCommand(o *commonOptions) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			present, content, err := banner.Lookup(is.Body, banner.TLDRName)
+			present, opener, content, err := banner.LookupOpener(is.Body, banner.TLDRName)
 			if err != nil {
 				return err
 			}
@@ -124,7 +123,7 @@ func newTLDRGetCommand(o *commonOptions) *cobra.Command {
 				}
 				return absent()
 			}
-			tsha, text, err := banner.ParseTLDR(content)
+			tsha, text, err := banner.ParseTLDR(opener, content)
 			if err != nil {
 				// Present but not in the managed shape: a real error, not a
 				// guessing opportunity.

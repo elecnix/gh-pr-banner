@@ -98,20 +98,22 @@ gh pr-banner tldr get --pr 42 --json   # {"banner": "...", "sha": "...", ...}
 The banner region looks like this in the body:
 
 ```md
-<!-- gh-pr-banner:tldr -->
-
-<!-- gh-pr-banner:tldr-head-sha: 1a2b3c4 -->
+<!-- gh-pr-banner:tldr tldr-head-sha: 1a2b3c4 -->
+> **TLDR**
 
 fixes the flaky retry loop
 
 <!-- /gh-pr-banner:tldr -->
 ```
 
-The SHA line is itself an HTML comment, so it is invisible when the body
-renders — only the summary shows. It stays machine-readable: `tldr get --json`
-and the parser both return it, and bodies written by earlier versions (where
-the SHA sat on a plain `tldr-head-sha:` first line) are still read back
-correctly; only new writes use the comment form.
+The SHA travels **inside the opening region comment** as an attribute, so it
+is invisible when the body renders — only the `> **TLDR**` label and the
+summary show. It stays machine-readable: `tldr get --json` and the parser
+both return it. Bodies written by earlier versions are still read back
+correctly — both where the SHA sat on a plain `tldr-head-sha:` first line and
+where it lived in a standalone `<!-- gh-pr-banner:tldr-head-sha: ... -->`
+comment — and re-stamping such a body normalizes it to the current shape in
+place; only new writes use the opener-carried form.
 
 Design rules, all deliberate:
 

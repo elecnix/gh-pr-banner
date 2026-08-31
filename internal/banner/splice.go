@@ -66,19 +66,29 @@ func openMarker(name string) string  { return openPrefix + name + markerSfx }
 func closeMarker(name string) string { return closePrefix + name + markerSfx }
 
 // markerName reports whether line, after trimming surrounding whitespace, is a
-// whole-line marker formed by prefix+name+suffix, and returns the name. Names
-// that do not match the valid-name shape yield no marker: a line that merely
-// looks marker-shaped but is not a canonical marker is ordinary text.
+// whole-line marker formed by prefix+name(+attrs)+suffix, and returns the
+// name. An opener may carry ` key: value` attribute pairs between the name
+// and the close of the comment (the tldr banner carries its head SHA there);
+// closing markers never carry attributes. Names that do not match the
+// valid-name shape yield no marker: a line that merely looks marker-shaped but
+// is not a canonical marker is ordinary text.
 func markerName(line, prefix, suffix string) (string, bool) {
 	line = strings.TrimSpace(line)
 	if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, suffix) {
 		return "", false
 	}
-	name := line[len(prefix) : len(line)-len(suffix)]
-	if !nameRE.MatchString(name) {
-		return "", false
+	body := line[len(prefix) : len(line)-len(suffix)]
+	if nameRE.MatchString(body) {
+		return body, true
 	}
-	return name, true
+	// Attribute form: "<name> <attributes>". The attribute payload is free
+	// text carried verbatim — the caller decides what it means.
+	if prefix == openPrefix {
+		if n, attrs, found := strings.Cut(body, " "); found && nameRE.MatchString(n) && attrs != "" {
+			return n, true
+		}
+	}
+	return "", false
 }
 
 // Outcome is the result of one Apply.
@@ -162,17 +172,22 @@ func regionFor(ms []marker, name string) (openLine, closeLine int, ok bool) {
 }
 
 // blockLines renders the banner region for name with the given content as the
-// set of lines that will own the region in the destination body.
-func blockLines(name, content string) []string {
+// set of lines that will own the region in the destination body. open is the
+// full opener line (a caller-supplied one for ApplyOpener). hugOpener: an
+// opener-carried attribute makes the first content line managed payload that
+// hugs the opener (no blank separator) — the tldr banner renders its label
+// immediately under the opener comment that carries the SHA.
+func blockLines(name, open, content string, hugOpener bool) []string {
 	content = strings.TrimSpace(content)
-	block := []string{openMarker(name)}
+	block := []string{open}
 	if content == "" {
 		return append(block, closeMarker(name))
 	}
-	block = append(block, "")
+	if !hugOpener {
+		block = append(block, "")
+	}
 	block = append(block, strings.Split(content, "\n")...)
-	block = append(block, "")
-	return append(block, closeMarker(name))
+	return append(block, "", closeMarker(name))
 }
 
 // joinLines reassembles lines into a body, stripping trailing blank lines that
@@ -208,21 +223,77 @@ func Apply(currentBody, name, content string, op Operation, at Placement) (Outco
 	if at != PlacementTop && at != PlacementBottom {
 		return Outcome{}, fmt.Errorf("invalid placement %q (want %q or %q)", at, PlacementTop, PlacementBottom)
 	}
+	want := strings.TrimSpace(content)
+	return splice(currentBody, name, func(open, existing string) (string, []string, error) {
+		if existing == want {
+			return "", nil, errUnchanged
+		}
+		return want, blockLines(name, open, want, false), nil
+	}, op, at)
+}
+
+// ApplyOpener is Apply with a caller-supplied opener: the region's opening
+// marker line is written verbatim as `opener` instead of the bare-name form,
+// so a banner kind that carries metadata in its opening comment (the tldr
+// banner carries the head SHA there) keeps it across every rewrite. OpClear
+// ignores the opener and behaves exactly like Apply's.
+func ApplyOpener(currentBody, name, opener, content string, op Operation, at Placement) (Outcome, error) {
+	if err := ValidateName(name); err != nil {
+		return Outcome{}, err
+	}
+	if at != PlacementTop && at != PlacementBottom {
+		return Outcome{}, fmt.Errorf("invalid placement %q (want %q or %q)", at, PlacementTop, PlacementBottom)
+	}
+	opener = strings.TrimSpace(opener)
+	if op == OpSet && (!strings.HasPrefix(opener, openPrefix+name) || !strings.HasSuffix(opener, markerSfx)) {
+		return Outcome{}, fmt.Errorf("internal error: opener %q does not open a %q banner", opener, name)
+	}
+	want := strings.TrimSpace(content)
+	// An opener that carries attributes after the bare name hugs its content:
+	// the first line is managed payload (the tldr label), not free prose.
+	hugOpener := strings.HasPrefix(opener, openPrefix+name+" ")
+	return splice(currentBody, name, func(open, existing string) (string, []string, error) {
+		if existing == want && open == opener {
+			return "", nil, errUnchanged
+		}
+		return want, blockLines(name, opener, want, hugOpener), nil
+	}, op, at)
+}
+
+// errUnchanged is the sentinel a region builder returns when the region
+// already holds exactly what was asked for.
+var errUnchanged = fmt.Errorf("unchanged")
+
+// splice is the shared deterministic edit behind Apply and ApplyOpener.
+// build receives the region's existing opener line and content ("" when
+// absent) and either returns errUnchanged (the region already holds what was
+// asked for) or the content and rendered lines the region should hold.
+func splice(currentBody, name string, build func(open, existing string) (string, []string, error), op Operation, at Placement) (Outcome, error) {
 	lines := strings.Split(currentBody, "\n")
 	ms, err := parseAndValidate(lines)
 	if err != nil {
 		return Outcome{}, err
 	}
-
-	block := blockLines(name, content)
 	o, c, present := regionFor(ms, name)
+	existingOpen, existingContent := openMarker(name), ""
+	if present {
+		existingOpen = strings.TrimSpace(lines[o])
+		existingContent = strings.TrimSpace(strings.Join(lines[o+1:c], "\n"))
+	}
 
 	switch op {
 	case OpSet:
+		content, block, err := build(existingOpen, existingContent)
+		if err == errUnchanged {
+			return Outcome{Action: ActionUnchanged, Present: present, Banner: existingContent, Body: currentBody}, nil
+		}
+		if err != nil {
+			return Outcome{}, err
+		}
 		if present {
 			newLines := append(append([]string{}, lines[:o]...), block...)
 			newLines = append(newLines, lines[c+1:]...)
-			out := Outcome{Present: true, Banner: strings.TrimSpace(content), Body: joinLines(newLines)}
+			out := Outcome{Present: true, Banner: content, Body: joinLines(newLines)}
 			if sameBody(currentBody, out.Body) {
 				out.Action = ActionUnchanged
 				out.Body = currentBody
@@ -247,8 +318,10 @@ func Apply(currentBody, name, content string, op Operation, at Placement) (Outco
 			newLines = append(newLines, lines...)
 			newLines = append(newLines, "")
 			newLines = append(newLines, block...)
+		default:
+			return Outcome{}, fmt.Errorf("invalid placement %q (want %q or %q)", at, PlacementTop, PlacementBottom)
 		}
-		return Outcome{Action: ActionSet, Present: true, Banner: strings.TrimSpace(content), Body: joinLines(newLines)}, nil
+		return Outcome{Action: ActionSet, Present: true, Banner: content, Body: joinLines(newLines)}, nil
 
 	case OpClear:
 		if !present {
@@ -272,19 +345,28 @@ func Apply(currentBody, name, content string, op Operation, at Placement) (Outco
 // Lookup reports whether a banner named `name` is present in body and, if so,
 // its content. It applies the same malformed-body validation as Apply.
 func Lookup(body, name string) (present bool, content string, err error) {
-	if err := ValidateName(name); err != nil {
-		return false, "", err
-	}
+	return lookup(body, name)
+}
+
+// LookupOpener reports whether a banner named `name` is present in body and,
+// if so, its opener line and content. A banner kind that carries metadata in
+// its opener reads it back here.
+func LookupOpener(body, name string) (present bool, opener, content string, err error) {
 	lines := strings.Split(body, "\n")
 	ms, err := parseAndValidate(lines)
 	if err != nil {
-		return false, "", err
+		return false, "", "", err
 	}
 	o, c, ok := regionFor(ms, name)
 	if !ok {
-		return false, "", nil
+		return false, "", "", nil
 	}
-	return true, strings.TrimSpace(strings.Join(lines[o+1:c], "\n")), nil
+	return true, strings.TrimSpace(lines[o]), strings.TrimSpace(strings.Join(lines[o+1:c], "\n")), nil
+}
+
+func lookup(body, name string) (bool, string, error) {
+	ok, _, content, err := LookupOpener(body, name)
+	return ok, content, err
 }
 
 // List returns the names of every banner present in body, in first-appearance
