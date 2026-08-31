@@ -44,7 +44,7 @@ func newSetCommand(o *commonOptions) *cobra.Command {
 			res := result{
 				Action:  out.Action,
 				Name:    name,
-				Repo:    o.owner + "/" + o.repoName,
+				Repo:    o.repoLabel(),
 				PR:      o.number,
 				URL:     o.url,
 				Present: out.Present,

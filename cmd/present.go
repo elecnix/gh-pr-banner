@@ -36,7 +36,7 @@ func newPresentCommand(o *commonOptions) *cobra.Command {
 					o.emit(result{
 						Action:  banner.ActionUnchanged,
 						Name:    name,
-						Repo:    o.owner + "/" + o.repoName,
+						Repo:    o.repoLabel(),
 						PR:      o.number,
 						URL:     o.url,
 						Present: false,
@@ -48,7 +48,7 @@ func newPresentCommand(o *commonOptions) *cobra.Command {
 				o.emit(result{
 					Action:  banner.ActionUnchanged,
 					Name:    name,
-					Repo:    o.owner + "/" + o.repoName,
+					Repo:    o.repoLabel(),
 					PR:      o.number,
 					URL:     o.url,
 					Present: true,

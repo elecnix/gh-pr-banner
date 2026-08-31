@@ -44,6 +44,22 @@ install is a no-op for most users.
 Every command targets a PR by `--pr NUMBER` (or derives it from the current
 branch when omitted) and `--repo OWNER/REPO` (or detects the current repo).
 
+Alternatively, pass `--file PATH` to target a **local file containing a PR
+body** instead of a PR. The same splice runs against the file's contents, and
+the file is rewritten in place. This lets a caller stamp the body _before_
+creating the PR — no body-edit event ever fires:
+
+```sh
+gh pr-banner tldr set --sha 1a2b3c4 --body "fixes the flaky retry loop" --file body.md
+gh pr create --body-file body.md   # banner already inside; no edit needed
+```
+
+`--file` is mutually exclusive with `--pr` and `--repo` (passing both is an
+error, and so is passing neither target). With `--file`, no repository or PR
+is resolved and no network call is made; `set`, `clear`, `get`, `present`,
+`list` and `tldr set`/`tldr get` all work, with the same idempotency and
+malformed-body guarantees as the PR target.
+
 ```sh
 # Add a banner (or update it in place if already present).
 gh pr-banner set do-not-merge --body "staging is red — do not merge" --pr 42
@@ -84,11 +100,18 @@ The banner region looks like this in the body:
 ```md
 <!-- gh-pr-banner:tldr -->
 
-tldr-head-sha: 1a2b3c4
+<!-- gh-pr-banner:tldr-head-sha: 1a2b3c4 -->
+
 fixes the flaky retry loop
 
 <!-- /gh-pr-banner:tldr -->
 ```
+
+The SHA line is itself an HTML comment, so it is invisible when the body
+renders — only the summary shows. It stays machine-readable: `tldr get --json`
+and the parser both return it, and bodies written by earlier versions (where
+the SHA sat on a plain `tldr-head-sha:` first line) are still read back
+correctly; only new writes use the comment form.
 
 Design rules, all deliberate:
 
@@ -105,15 +128,16 @@ Design rules, all deliberate:
 
 ### Flags
 
-| Flag                    | Meaning                                                        |
-| ----------------------- | -------------------------------------------------------------- |
-| `-R, --repo OWNER/REPO` | target repo (default: current directory's repo)                |
-| `--pr NUMBER`           | PR number (default: PR for the current branch)                 |
-| `--at top\|bottom`      | where a _new_ region goes (`set` only; default top)            |
-| `--body TEXT`           | banner content (`set`; mutually exclusive with `--body-file`)  |
-| `-F, --body-file PATH`  | read banner content from a file                                |
-| `--dry-run`             | resolve and print what would change; **never** write to GitHub |
-| `--json`                | machine-readable output                                        |
+| Flag                    | Meaning                                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `-R, --repo OWNER/REPO` | target repo (default: current directory's repo)                                                           |
+| `--pr NUMBER`           | PR number (default: PR for the current branch)                                                            |
+| `--file PATH`           | operate on a local file instead of a PR (rewritten in place; mutually exclusive with `--pr` and `--repo`) |
+| `--at top\|bottom`      | where a _new_ region goes (`set` only; default top)                                                       |
+| `--body TEXT`           | banner content (`set`; mutually exclusive with `--body-file`)                                             |
+| `-F, --body-file PATH`  | read banner content from a file                                                                           |
+| `--dry-run`             | resolve and print what would change; **never** write to GitHub                                            |
+| `--json`                | machine-readable output                                                                                   |
 
 ## Semantics that matter
 

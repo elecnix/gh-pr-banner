@@ -35,6 +35,7 @@ func absent() error { return &ExitError{Code: ExitAbsent, Err: errors.New("banne
 type commonOptions struct {
 	repo   string
 	pr     int
+	file   string
 	json   bool
 	dryRun bool
 	at     string
@@ -92,9 +93,21 @@ func newRootCommand() *cobra.Command {
 	addCommonFlags(root, o)
 	// PersistentPreRunE resolves the target once; it runs before the subcommand.
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if o.file != "" {
+			// File target: everything happens locally, no repository or PR is
+			// resolved and no network call is made.
+			if o.pr != 0 {
+				return fmt.Errorf("--pr and --file are mutually exclusive: pick one target")
+			}
+			if o.repo != "" {
+				return fmt.Errorf("--repo and --file are mutually exclusive: pick one target")
+			}
+			o.url = o.file
+			return nil
+		}
 		owner, repo, explicitRepo, err := ghapi.ResolveRepo(o.repo)
 		if err != nil {
-			return err
+			return fmt.Errorf("%w (or pass --file PATH to operate on a local file instead of a PR)", err)
 		}
 		number, err := ghapi.ResolvePRNumber(owner, repo, explicitRepo, o.pr)
 		if err != nil {
@@ -116,8 +129,18 @@ func newRootCommand() *cobra.Command {
 func addCommonFlags(cmd *cobra.Command, o *commonOptions) {
 	cmd.PersistentFlags().StringVarP(&o.repo, "repo", "R", "", "OWNER/REPO to operate on (default: repository in the current directory)")
 	cmd.PersistentFlags().IntVar(&o.pr, "pr", 0, "pull request number (default: PR for the current branch)")
+	cmd.PersistentFlags().StringVar(&o.file, "file", "", "operate on a local file containing the body instead of a PR (rewritten in place; mutually exclusive with --pr and --repo)")
 	cmd.PersistentFlags().BoolVar(&o.json, "json", false, "emit machine-readable JSON")
 	cmd.PersistentFlags().BoolVar(&o.dryRun, "dry-run", false, "resolve and print what would change without writing to GitHub")
+}
+
+// repoLabel is the human/JSON label for the target repository; empty in file
+// mode, where there is no repository.
+func (o *commonOptions) repoLabel() string {
+	if o.file != "" {
+		return ""
+	}
+	return o.owner + "/" + o.repoName
 }
 
 // placement returns the parsed banner placement (defaulting to top).
@@ -168,6 +191,19 @@ func (o *commonOptions) emit(r result) {
 // from the pre-read body; expectSet is the exact content the region must hold
 // afterwards (empty for a clear, for which the frame must be absent).
 func (o *commonOptions) write(expectSet bool, name, expectContent, newBody string) error {
+	if o.file != "" {
+		// File target: no concurrent-writer race with a server, but the same
+		// re-read-and-verify discipline applies — the file must hold exactly
+		// what was computed.
+		if err := os.WriteFile(o.file, []byte(newBody), 0o644); err != nil {
+			return fmt.Errorf("write --file: %w", err)
+		}
+		b, err := os.ReadFile(o.file)
+		if err != nil {
+			return fmt.Errorf("re-read --file: %w", err)
+		}
+		return verifyBody(expectSet, name, expectContent, string(b))
+	}
 	if _, err := ghapi.PatchBody(o.owner, o.repoName, o.number, newBody); err != nil {
 		return err
 	}
@@ -175,30 +211,45 @@ func (o *commonOptions) write(expectSet bool, name, expectContent, newBody strin
 	if err != nil {
 		return err
 	}
+	return verifyBody(expectSet, name, expectContent, fresh.Body)
+}
+
+// verifyBody confirms the region landed as intended, failing loudly if a
+// concurrent writer clobbered it. expectSet is the exact content the region
+// must hold afterwards (empty for a clear, for which the frame must be absent).
+func verifyBody(expectSet bool, name, expectContent, body string) error {
 	if expectSet {
-		ok, content, err := banner.Lookup(fresh.Body, name)
+		ok, content, err := banner.Lookup(body, name)
 		if err != nil {
-			return fmt.Errorf("concurrent modification suspected: body is now malformed after patch: %w", err)
+			return fmt.Errorf("concurrent modification suspected: body is now malformed after write: %w", err)
 		}
 		if !ok {
-			return fmt.Errorf("concurrent modification suspected: banner %q is absent after patch", name)
+			return fmt.Errorf("concurrent modification suspected: banner %q is absent after write", name)
 		}
 		if content != expectContent {
-			return fmt.Errorf("concurrent modification suspected: banner %q was overwritten after patch", name)
+			return fmt.Errorf("concurrent modification suspected: banner %q was overwritten after write", name)
 		}
-	} else {
-		ok, _, err := banner.Lookup(fresh.Body, name)
-		if err != nil {
-			return fmt.Errorf("concurrent modification suspected: body is now malformed after patch: %w", err)
-		}
-		if ok {
-			return fmt.Errorf("concurrent modification suspected: banner %q reappeared after clear", name)
-		}
+		return nil
+	}
+	ok, _, err := banner.Lookup(body, name)
+	if err != nil {
+		return fmt.Errorf("concurrent modification suspected: body is now malformed after write: %w", err)
+	}
+	if ok {
+		return fmt.Errorf("concurrent modification suspected: banner %q reappeared after clear", name)
 	}
 	return nil
 }
 
-// fetch gets the current issue/PR document.
+// fetch gets the current target body: the file's contents in file mode, the
+// issue/PR document otherwise.
 func (o *commonOptions) fetch() (ghapi.Issue, error) {
+	if o.file != "" {
+		b, err := os.ReadFile(o.file)
+		if err != nil {
+			return ghapi.Issue{}, fmt.Errorf("read --file: %w", err)
+		}
+		return ghapi.Issue{Body: string(b)}, nil
+	}
 	return ghapi.GetIssue(o.owner, o.repoName, o.number)
 }

@@ -62,7 +62,7 @@ func newTLDRSetCommand(o *commonOptions) *cobra.Command {
 			res := result{
 				Action:  out.Action,
 				Name:    banner.TLDRName,
-				Repo:    o.owner + "/" + o.repoName,
+				Repo:    o.repoLabel(),
 				PR:      o.number,
 				URL:     o.url,
 				Present: out.Present,
@@ -116,7 +116,7 @@ func newTLDRGetCommand(o *commonOptions) *cobra.Command {
 					o.emit(result{
 						Action:  "get",
 						Name:    banner.TLDRName,
-						Repo:    o.owner + "/" + o.repoName,
+						Repo:    o.repoLabel(),
 						PR:      o.number,
 						URL:     o.url,
 						Present: false,
@@ -134,7 +134,7 @@ func newTLDRGetCommand(o *commonOptions) *cobra.Command {
 				o.emit(result{
 					Action:  "get",
 					Name:    banner.TLDRName,
-					Repo:    o.owner + "/" + o.repoName,
+					Repo:    o.repoLabel(),
 					PR:      o.number,
 					URL:     o.url,
 					Present: true,
