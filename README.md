@@ -99,6 +99,7 @@ The banner region looks like this in the body:
 
 ```md
 <!-- gh-pr-banner:tldr tldr-head-sha: 1a2b3c4 -->
+
 > **TLDR**
 
 fixes the flaky retry loop
