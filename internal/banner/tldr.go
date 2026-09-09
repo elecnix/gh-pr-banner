@@ -4,9 +4,14 @@
 //
 //	<!-- gh-pr-banner:tldr tldr-head-sha: <sha> -->
 //	> **TLDR**
-//	<one or two author-written sentences>
+//	> <one or two author-written sentences>
 //
 //	<!-- /gh-pr-banner:tldr -->
+//
+// The label and the summary share one blockquote, so the whole TLDR renders
+// as a single quoted block rather than a bold line followed by loose prose.
+// The quote prefix is presentation only: the writer adds it, the reader takes
+// it off, and ParseTLDR returns the author's text exactly as written.
 //
 // The SHA travels IN the opening region comment, so it is invisible when the
 // body renders while staying parseable by this package. The "> **TLDR**"
@@ -32,6 +37,15 @@ const TLDRName = "tldr"
 // and prose that begins with it is never reader content.
 const TLDRLabel = "> **TLDR**"
 
+// tldrQuotePrefix opens each rendered summary line so the label and the prose
+// render as one blockquote. A blank summary line becomes the bare marker
+// (no trailing space), because a truly empty line would end the quote and
+// drop the rest of the summary out of it.
+const (
+	tldrQuotePrefix = "> "
+	tldrQuoteBlank  = ">"
+)
+
 // TLDRSHAPrefix is the opener-carried attribute carrying the head SHA the
 // banner describes.
 const TLDRSHAPrefix = "tldr-head-sha:"
@@ -42,6 +56,13 @@ const TLDRSHAPrefix = "tldr-head-sha:"
 const (
 	tldrSHACommentOpen  = "<!-- gh-pr-banner:tldr-head-sha:"
 	tldrSHACommentClose = "-->"
+)
+
+// htmlCommentOpen/Close are the raw HTML comment delimiters. A value written
+// inside a marker comment must contain neither, or the comment ends early.
+const (
+	htmlCommentOpen  = "<!--"
+	htmlCommentClose = "-->"
 )
 
 // tldrSHALegacyPrefix is the earliest canonical first line, where the SHA sat
@@ -56,9 +77,79 @@ func TLDROpener(sha string) string {
 }
 
 // tldrBody renders the banner content, excluding the opener: the label line,
-// then the author's summary. text with no summary yields just the label.
+// then the author's summary, every line quoted so the two render as one
+// blockquote. text with no summary yields just the label.
 func tldrBody(text string) string {
-	return TLDRLabel + "\n" + strings.TrimSpace(text)
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return TLDRLabel
+	}
+	return TLDRLabel + "\n" + quoteLines(text)
+}
+
+// quoteLines prefixes every line with the blockquote marker.
+func quoteLines(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			lines[i] = tldrQuoteBlank
+			continue
+		}
+		lines[i] = tldrQuotePrefix + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+// unquoteLines removes the blockquote marker quoteLines added. A line without
+// one is returned unchanged, so bodies stamped before the summary was quoted
+// still read back.
+func unquoteLines(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if rest, found := strings.CutPrefix(line, tldrQuotePrefix); found {
+			lines[i] = rest
+			continue
+		}
+		if strings.TrimSpace(line) == tldrQuoteBlank {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// validateTLDRSHA rejects a SHA that would break the opening marker. The SHA
+// is caller-supplied (the --sha flag), and it is written inside an HTML
+// comment: "-->" would end that comment early, leaving the rest of the SHA as
+// visible text and the region without a usable opener, and a newline would
+// splice arbitrary lines into the body. The tool refuses the write rather
+// than rewrite what the caller passed — same rule as a malformed body.
+func validateTLDRSHA(sha string) error {
+	if strings.TrimSpace(sha) == "" {
+		return fmt.Errorf("tldr head sha is empty")
+	}
+	for _, bad := range []string{htmlCommentClose, htmlCommentOpen, "\n", "\r"} {
+		if strings.Contains(sha, bad) {
+			return fmt.Errorf("tldr head sha %q contains %q, which would break the opening marker comment — refusing to write it", sha, bad)
+		}
+	}
+	return nil
+}
+
+// validateTLDRPayload rejects rendered banner content that would be read back
+// as a marker. Quoting every summary line already prevents it — a quoted line
+// is no longer marker-shaped — so this never fires on real prose; it is here
+// so that removing the quote prefix fails loudly instead of silently letting
+// a summary close its own region.
+func validateTLDRPayload(content string) error {
+	for i, line := range strings.Split(content, "\n") {
+		if _, ok := markerName(line, openPrefix, markerSfx); ok {
+			return fmt.Errorf("tldr summary line %d is a banner opening marker, which would split the region — refusing to write it", i+1)
+		}
+		if _, ok := markerName(line, closePrefix, markerSfx); ok {
+			return fmt.Errorf("tldr summary line %d is a banner closing marker, which would close the region early — refusing to write it", i+1)
+		}
+	}
+	return nil
 }
 
 // TLDRApply splices a TLDR banner describing sha, with the author-written
@@ -67,7 +158,18 @@ func tldrBody(text string) string {
 // end-to-end (Action Unchanged, no network write); re-stamping replaces in
 // place, never appends.
 func TLDRApply(body, sha, text string, op Operation, at Placement) (Outcome, error) {
-	return ApplyOpener(body, TLDRName, TLDROpener(sha), tldrBody(text), op, at)
+	content := tldrBody(text)
+	if op == OpSet {
+		// Only a write needs a well-formed opener and payload; OpClear ignores
+		// both and removes the region whatever it holds.
+		if err := validateTLDRSHA(sha); err != nil {
+			return Outcome{}, err
+		}
+		if err := validateTLDRPayload(content); err != nil {
+			return Outcome{}, err
+		}
+	}
+	return ApplyOpener(body, TLDRName, TLDROpener(sha), content, op, at)
 }
 
 // ParseTLDR extracts the SHA and the author-written summary from TLDR banner
@@ -133,14 +235,15 @@ func parseLegacyTLDR(content string) (sha, text string, err error) {
 }
 
 // stripLabel removes the managed TLDR label line from the start of the
-// summary, and trims the remainder — the label is never reader-visible text.
+// summary, takes the blockquote prefix off what remains, and trims it — the
+// label and the quote marker are never reader-visible text.
 func stripLabel(text string) string {
 	text = strings.TrimSpace(text)
 	if text == TLDRLabel {
 		return ""
 	}
 	if rest, found := strings.CutPrefix(text, TLDRLabel+"\n"); found {
-		return strings.TrimSpace(rest)
+		return strings.TrimSpace(unquoteLines(strings.TrimSpace(rest)))
 	}
 	return text
 }

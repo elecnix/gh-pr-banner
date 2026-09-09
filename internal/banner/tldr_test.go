@@ -18,9 +18,14 @@ const (
 	exampleText = "The retry loop now backs off exponentially instead of\nhammering the staging endpoint; the flaky tests that timed out under\nload pass consistently."
 )
 
+// wantTLDRBlock is written out line by line rather than derived from
+// exampleText, so the expected rendering is stated independently of the code
+// that produces it.
 var wantTLDRBlock = "<!-- gh-pr-banner:tldr tldr-head-sha: " + exampleSHA + " -->\n" +
 	"> **TLDR**\n" +
-	exampleText + "\n" +
+	"> The retry loop now backs off exponentially instead of\n" +
+	"> hammering the staging endpoint; the flaky tests that timed out under\n" +
+	"> load pass consistently.\n" +
 	"\n" +
 	"<!-- /gh-pr-banner:tldr -->"
 
@@ -74,7 +79,7 @@ func TestTLDRLabelIsManagedPayload(t *testing.T) {
 	if text != "one line\nsecond line" {
 		t.Fatalf("text = %q, want one line\\nsecond line", text)
 	}
-	if !strings.HasPrefix(out.Body, "<!-- gh-pr-banner:tldr tldr-head-sha: abc123 -->\n> **TLDR**\n") {
+	if !strings.HasPrefix(out.Body, "<!-- gh-pr-banner:tldr tldr-head-sha: abc123 -->\n> **TLDR**\n> one line\n> second line\n") {
 		t.Fatalf("label not immediately under the opener:\n%s", out.Body)
 	}
 }
@@ -276,7 +281,7 @@ func TestTLDRLegacyBodyStampsUpToNewFormat(t *testing.T) {
 	if out.Action != ActionUpdated {
 		t.Fatalf("action = %s, want updated", out.Action)
 	}
-	want := "<!-- gh-pr-banner:tldr tldr-head-sha: abc123 -->\n> **TLDR**\nships a thing\n\n<!-- /gh-pr-banner:tldr -->"
+	want := "<!-- gh-pr-banner:tldr tldr-head-sha: abc123 -->\n> **TLDR**\n> ships a thing\n\n<!-- /gh-pr-banner:tldr -->"
 	if out.Body != want {
 		t.Fatalf("legacy body was not normalized to the canonical shape:\n%s\nwant:\n%s", out.Body, want)
 	}
@@ -310,5 +315,136 @@ func TestTLDRSetPreservesOtherBanners(t *testing.T) {
 	}
 	if !strings.HasPrefix(out.Body, "pre") {
 		t.Fatalf("leading prose was lost:\n%s", out.Body)
+	}
+}
+
+func TestTLDRRendersSummaryAsBlockquote(t *testing.T) {
+	// The whole TLDR renders as one blockquote: the label and every summary
+	// line carry the "> " prefix, and a blank line separates the quote from
+	// the closing marker. This is the shape a reader sees on the PR page.
+	out, err := TLDRApply("", "1a2b3c4", "fixes the flaky retry loop", OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	want := "<!-- gh-pr-banner:tldr tldr-head-sha: 1a2b3c4 -->\n" +
+		"> **TLDR**\n" +
+		"> fixes the flaky retry loop\n" +
+		"\n" +
+		"<!-- /gh-pr-banner:tldr -->"
+	if out.Body != want {
+		t.Fatalf("body:\n%s\nwant:\n%s", out.Body, want)
+	}
+	// The quote prefix is presentation: the reader gets the author's text back
+	// exactly as written.
+	_, text := readTLDR(t, out.Body)
+	if text != "fixes the flaky retry loop" {
+		t.Fatalf("text = %q, want the unquoted summary", text)
+	}
+}
+
+func TestTLDRBlankSummaryLineKeepsOneBlockquote(t *testing.T) {
+	// A blank line inside the summary must stay inside the quote, or markdown
+	// would end the blockquote and render the rest as plain prose. It comes
+	// back as a blank line, not as a ">".
+	out, err := TLDRApply("", "abc123", "first para\n\nsecond para", OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	want := "<!-- gh-pr-banner:tldr tldr-head-sha: abc123 -->\n" +
+		"> **TLDR**\n" +
+		"> first para\n" +
+		">\n" +
+		"> second para\n" +
+		"\n" +
+		"<!-- /gh-pr-banner:tldr -->"
+	if out.Body != want {
+		t.Fatalf("body:\n%s\nwant:\n%s", out.Body, want)
+	}
+	_, text := readTLDR(t, out.Body)
+	if text != "first para\n\nsecond para" {
+		t.Fatalf("text = %q, want the blank line back", text)
+	}
+}
+
+func TestTLDRUnquotedSummaryStillReadsBack(t *testing.T) {
+	// Bodies stamped before the summary was quoted have bare prose under the
+	// label. They must still read back, unchanged.
+	body := "<!-- gh-pr-banner:tldr tldr-head-sha: abc123 -->\n> **TLDR**\nships a thing\n\n<!-- /gh-pr-banner:tldr -->"
+	sha, text := readTLDR(t, body)
+	if sha != "abc123" || text != "ships a thing" {
+		t.Fatalf("sha = %q, text = %q; want abc123 / ships a thing", sha, text)
+	}
+}
+
+func TestTLDRRejectsSHAThatWouldCloseTheOpenerComment(t *testing.T) {
+	// The SHA is caller-supplied. One containing "-->" would end the opening
+	// HTML comment early, so the remainder would render as visible text and
+	// the marker structure would be broken. Refuse the write instead.
+	for _, sha := range []string{
+		"abc123 --> leaked",
+		"abc123 <!-- nested",
+		"abc123\n<!-- gh-pr-banner:tldr -->",
+	} {
+		out, err := TLDRApply("existing prose", sha, "a summary", OpSet, PlacementTop)
+		if err == nil {
+			t.Fatalf("sha %q was accepted; body:\n%s", sha, out.Body)
+		}
+		if out.Body != "" {
+			t.Fatalf("sha %q was rejected but a body came back: %q", sha, out.Body)
+		}
+	}
+}
+
+func TestTLDRSummaryContainingClosingMarkerStaysInsideTheRegion(t *testing.T) {
+	// A summary that quotes the closing marker must not close the region
+	// early: the banner stays one well-formed region and the text round-trips.
+	summary := "explains the fence:\n<!-- /gh-pr-banner:tldr -->\nand why it matters"
+	out, err := TLDRApply("pre\n\npost", "abc123", summary, OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	// Exactly one region, still well-formed and still parseable.
+	names, err := List(out.Body)
+	if err != nil {
+		t.Fatalf("the spliced body is malformed: %v", err)
+	}
+	if len(names) != 1 || names[0] != TLDRName {
+		t.Fatalf("names = %v, want [tldr]", names)
+	}
+	sha, text := readTLDR(t, out.Body)
+	if sha != "abc123" || text != summary {
+		t.Fatalf("round trip: sha = %q, text = %q, want the summary verbatim", sha, text)
+	}
+	if !strings.HasPrefix(out.Body, "<!-- gh-pr-banner:tldr") || !strings.HasSuffix(out.Body, "post") {
+		t.Fatalf("surrounding prose was lost:\n%s", out.Body)
+	}
+	// Re-stamping the same summary is still a no-op.
+	again, err := TLDRApply(out.Body, "abc123", summary, OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("re-stamp: %v", err)
+	}
+	if again.Action != ActionUnchanged {
+		t.Fatalf("re-stamp action = %s, want unchanged", again.Action)
+	}
+}
+
+func TestTLDRSummaryContainingOpeningMarkerStaysInsideTheRegion(t *testing.T) {
+	// The mirror case: a summary quoting an OPENING marker must not create a
+	// second region, which would make the body ambiguous and unwritable.
+	summary := "do not write <!-- gh-pr-banner:tldr -->\non its own line"
+	out, err := TLDRApply("", "abc123", summary, OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	names, err := List(out.Body)
+	if err != nil {
+		t.Fatalf("the spliced body is malformed: %v", err)
+	}
+	if len(names) != 1 {
+		t.Fatalf("names = %v, want exactly one region", names)
+	}
+	_, text := readTLDR(t, out.Body)
+	if text != summary {
+		t.Fatalf("text = %q, want the summary verbatim", text)
 	}
 }

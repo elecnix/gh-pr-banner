@@ -101,20 +101,23 @@ The banner region looks like this in the body:
 <!-- gh-pr-banner:tldr tldr-head-sha: 1a2b3c4 -->
 
 > **TLDR**
-
-fixes the flaky retry loop
+> fixes the flaky retry loop
 
 <!-- /gh-pr-banner:tldr -->
 ```
+
+The label and the summary share one blockquote, so the TLDR reads as a single
+quoted block instead of a bold line above loose prose. The `> ` prefix is
+presentation: `tldr get` returns the summary exactly as its author wrote it.
 
 The SHA travels **inside the opening region comment** as an attribute, so it
 is invisible when the body renders — only the `> **TLDR**` label and the
 summary show. It stays machine-readable: `tldr get --json` and the parser
 both return it. Bodies written by earlier versions are still read back
-correctly — both where the SHA sat on a plain `tldr-head-sha:` first line and
-where it lived in a standalone `<!-- gh-pr-banner:tldr-head-sha: ... -->`
-comment — and re-stamping such a body normalizes it to the current shape in
-place; only new writes use the opener-carried form.
+correctly — the SHA on a plain `tldr-head-sha:` first line, the SHA in a
+standalone `<!-- gh-pr-banner:tldr-head-sha: ... -->` comment, and a summary
+stamped before it was quoted — and re-stamping such a body normalizes it to
+the current shape in place; only new writes use the current form.
 
 Design rules, all deliberate:
 
@@ -126,6 +129,13 @@ Design rules, all deliberate:
   never a gate or a check.
 - **Never generated from the diff.** The summary is always written by a human;
   the command has no fallback that synthesizes one.
+- **A SHA that would break the opening comment is refused.** `--sha` is
+  caller-supplied and lands inside an HTML comment, so a value containing
+  `-->`, `<!--`, or a newline would end that comment early and leave the
+  region without a usable opener. `set` fails and writes nothing, rather than
+  rewriting what you passed. A summary needs no such rule: every summary line
+  is quoted, so one that mentions a marker stays ordinary text inside the
+  region.
 - **Clearing is shared with the generic commands.** `gh pr-banner clear tldr`
   and `gh pr-banner present tldr` work on the same region.
 
