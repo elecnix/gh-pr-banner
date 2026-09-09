@@ -37,7 +37,7 @@ func newGetCommand(o *commonOptions) *cobra.Command {
 					o.emit(result{
 						Action:  "get",
 						Name:    name,
-						Repo:    o.owner + "/" + o.repoName,
+						Repo:    o.repoLabel(),
 						PR:      o.number,
 						URL:     o.url,
 						Present: true,
@@ -54,7 +54,7 @@ func newGetCommand(o *commonOptions) *cobra.Command {
 				o.emit(result{
 					Action:  "get",
 					Name:    name,
-					Repo:    o.owner + "/" + o.repoName,
+					Repo:    o.repoLabel(),
 					PR:      o.number,
 					URL:     o.url,
 					Present: false,

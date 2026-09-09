@@ -1,15 +1,26 @@
 // TLDR banner kind: an author-written summary plus the SHA it describes.
 //
-// A banner named TLDRName ("tldr") whose region holds two things:
+// A banner named TLDRName ("tldr") whose region holds:
 //
-//	tldr-head-sha: <sha>
-//	<one or two author-written sentences>
+//	<!-- gh-pr-banner:tldr tldr-head-sha: <sha> -->
+//	> **TLDR**
+//	> <one or two author-written sentences>
 //
-// The SHA is stored, never enforced — freshness is computed by the READER
-// (which compares changed-file sets and renders the banner marked stale when
-// they differ; a head that moved with an identical file set stays fresh).
-// Nothing here ever generates the summary from a diff: the whole value of a
-// TLDR is that a human wrote it.
+//	<!-- /gh-pr-banner:tldr -->
+//
+// The label and the summary share one blockquote, so the whole TLDR renders
+// as a single quoted block rather than a bold line followed by loose prose.
+// The quote prefix is presentation only: the writer adds it, the reader takes
+// it off, and ParseTLDR returns the author's text exactly as written.
+//
+// The SHA travels IN the opening region comment, so it is invisible when the
+// body renders while staying parseable by this package. The "> **TLDR**"
+// label is managed payload: the writer emits it, the parser strips it. The
+// SHA is stored, never enforced — freshness is computed by the READER (which
+// compares changed-file sets and renders the banner marked stale when they
+// differ; a head that moved with an identical file set stays fresh). Nothing
+// here ever generates the summary from a diff: the whole value of a TLDR is
+// that a human wrote it.
 package banner
 
 import (
@@ -21,51 +32,240 @@ import (
 // readers look for this name specifically, not for a name shape.
 const TLDRName = "tldr"
 
-// tldrSHAPrefix marks the line carrying the SHA the banner describes. It must
-// be the first line of the banner region: everything after it is the summary
-// itself, which may legitimately say anything — including a line that happens
-// to contain this prefix.
-const tldrSHAPrefix = "tldr-head-sha:"
+// TLDRLabel is the fixed visible label line rendered immediately under the
+// opener. It is managed payload: the writer emits it, the parser strips it,
+// and prose that begins with it is never reader content.
+const TLDRLabel = "> **TLDR**"
 
-// TLDRContent renders the canonical banner content for a TLDR describing
-// sha. The result is stable: re-wrapping content that already carries the SHA
-// line changes nothing, so re-stamping the same summary + SHA is idempotent
-// end-to-end (Apply reports Unchanged and makes no network write).
-//
-// text is the author's summary; any sha-carrying first line in it is dropped
-// so the canonical form has exactly one.
-func TLDRContent(sha, text string) string {
-	sha = strings.TrimSpace(sha)
+// tldrQuotePrefix opens each rendered summary line so the label and the prose
+// render as one blockquote. A blank summary line becomes the bare marker
+// (no trailing space), because a truly empty line would end the quote and
+// drop the rest of the summary out of it.
+const (
+	tldrQuotePrefix = "> "
+	tldrQuoteBlank  = ">"
+)
+
+// TLDRSHAPrefix is the opener-carried attribute carrying the head SHA the
+// banner describes.
+const TLDRSHAPrefix = "tldr-head-sha:"
+
+// tldrSHACommentOpen/close fence the intermediate HTML-comment form — a
+// standalone comment line inside the region, with no label — written by an
+// older version. It remains readable.
+const (
+	tldrSHACommentOpen  = "<!-- gh-pr-banner:tldr-head-sha:"
+	tldrSHACommentClose = "-->"
+)
+
+// htmlCommentOpen/Close are the raw HTML comment delimiters. A value written
+// inside a marker comment must contain neither, or the comment ends early.
+const (
+	htmlCommentOpen  = "<!--"
+	htmlCommentClose = "-->"
+)
+
+// tldrSHALegacyPrefix is the earliest canonical first line, where the SHA sat
+// in plain text. Old bodies in this shape remain readable; new writes always
+// carry the SHA in the opener.
+const tldrSHALegacyPrefix = "tldr-head-sha:"
+
+// TLDROpener renders the opening marker line for a TLDR describing sha:
+// the marker comment with the SHA carried inside it as an attribute.
+func TLDROpener(sha string) string {
+	return openPrefix + TLDRName + " " + TLDRSHAPrefix + " " + strings.TrimSpace(sha) + markerSfx
+}
+
+// tldrBody renders the banner content, excluding the opener: the label line,
+// then the author's summary, every line quoted so the two render as one
+// blockquote. text with no summary yields just the label.
+func tldrBody(text string) string {
 	text = strings.TrimSpace(text)
-	if lines := strings.SplitN(text, "\n", 2); len(lines) == 2 && strings.HasPrefix(lines[0], tldrSHAPrefix) {
-		text = strings.TrimSpace(lines[1])
-	}
 	if text == "" {
-		return tldrSHAPrefix + " " + sha
+		return TLDRLabel
 	}
-	return tldrSHAPrefix + " " + sha + "\n" + text
+	return TLDRLabel + "\n" + quoteLines(text)
+}
+
+// quoteLines prefixes every line with the blockquote marker.
+func quoteLines(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			lines[i] = tldrQuoteBlank
+			continue
+		}
+		lines[i] = tldrQuotePrefix + line
+	}
+	return strings.Join(lines, "\n")
+}
+
+// unquoteLines removes the blockquote marker quoteLines added. A line without
+// one is returned unchanged, so bodies stamped before the summary was quoted
+// still read back.
+func unquoteLines(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if rest, found := strings.CutPrefix(line, tldrQuotePrefix); found {
+			lines[i] = rest
+			continue
+		}
+		if strings.TrimSpace(line) == tldrQuoteBlank {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// validateTLDRSHA rejects a SHA that would break the opening marker. The SHA
+// is caller-supplied (the --sha flag), and it is written inside an HTML
+// comment: "-->" would end that comment early, leaving the rest of the SHA as
+// visible text and the region without a usable opener, and a newline would
+// splice arbitrary lines into the body. The tool refuses the write rather
+// than rewrite what the caller passed — same rule as a malformed body.
+func validateTLDRSHA(sha string) error {
+	if strings.TrimSpace(sha) == "" {
+		return fmt.Errorf("tldr head sha is empty")
+	}
+	for _, bad := range []string{htmlCommentClose, htmlCommentOpen, "\n", "\r"} {
+		if strings.Contains(sha, bad) {
+			return fmt.Errorf("tldr head sha %q contains %q, which would break the opening marker comment — refusing to write it", sha, bad)
+		}
+	}
+	return nil
+}
+
+// validateTLDRPayload rejects rendered banner content that would be read back
+// as a marker. Quoting every summary line already prevents it — a quoted line
+// is no longer marker-shaped — so this never fires on real prose; it is here
+// so that removing the quote prefix fails loudly instead of silently letting
+// a summary close its own region.
+func validateTLDRPayload(content string) error {
+	for i, line := range strings.Split(content, "\n") {
+		if _, ok := markerName(line, openPrefix, markerSfx); ok {
+			return fmt.Errorf("tldr summary line %d is a banner opening marker, which would split the region — refusing to write it", i+1)
+		}
+		if _, ok := markerName(line, closePrefix, markerSfx); ok {
+			return fmt.Errorf("tldr summary line %d is a banner closing marker, which would close the region early — refusing to write it", i+1)
+		}
+	}
+	return nil
+}
+
+// TLDRApply splices a TLDR banner describing sha, with the author-written
+// summary, into body. The SHA lives in the opening region comment; the label
+// is part of the payload. Re-stamping the same summary + SHA is idempotent
+// end-to-end (Action Unchanged, no network write); re-stamping replaces in
+// place, never appends.
+func TLDRApply(body, sha, text string, op Operation, at Placement) (Outcome, error) {
+	content := tldrBody(text)
+	if op == OpSet {
+		// Only a write needs a well-formed opener and payload; OpClear ignores
+		// both and removes the region whatever it holds.
+		if err := validateTLDRSHA(sha); err != nil {
+			return Outcome{}, err
+		}
+		if err := validateTLDRPayload(content); err != nil {
+			return Outcome{}, err
+		}
+	}
+	return ApplyOpener(body, TLDRName, TLDROpener(sha), content, op, at)
 }
 
 // ParseTLDR extracts the SHA and the author-written summary from TLDR banner
-// content, as returned by Lookup(body, TLDRName). It fails loudly rather than
-// guess when the payload is not in the managed shape: the SHA line must be the
-// first line and must carry a non-empty SHA.
-func ParseTLDR(content string) (sha, text string, err error) {
+// content as returned by LookupOpener(body, TLDRName) — opener being the
+// region's opening marker line and content everything after it. It fails
+// loudly rather than guess when the payload is not in the managed shape: the
+// first content line must carry the SHA in some recognized form.
+//
+// Three reader-visible shapes of the SHA remain readable, so an
+// already-stamped PR never becomes unparseable:
+//
+//   - opener-carried: "<!-- gh-pr-banner:tldr tldr-head-sha: <sha> -->"
+//   - standalone comment (intermediate): "<!-- gh-pr-banner:tldr-head-sha: <sha> -->"
+//   - plain text (legacy): "tldr-head-sha: <sha>"
+func ParseTLDR(opener, content string) (sha, text string, err error) {
+	sha, err = parseOpenerSHA(opener)
+	if err != nil {
+		// No SHA in the opener: fall back to reading the payload's first line
+		// in one of the older shapes.
+		return parseLegacyTLDR(content)
+	}
+	return sha, stripLabel(content), nil
+}
+
+// parseOpenerSHA extracts the SHA attribute from a TLDR opener line, or an
+// error when the opener carries none.
+func parseOpenerSHA(opener string) (string, error) {
+	// Trim the marker scaffolding: "<!-- gh-pr-banner:tldr" ... " -->".
+	if !strings.HasPrefix(opener, openPrefix+TLDRName) || !strings.HasSuffix(opener, markerSfx) {
+		return "", fmt.Errorf("not a tldr opener")
+	}
+	// The opener body after the name is " tldr-head-sha: <sha>" (leading
+	// space always present) — or empty for the bare-name form.
+	attr := strings.TrimSuffix(strings.TrimPrefix(opener, openPrefix+TLDRName), markerSfx)
+	rest, found := strings.CutPrefix(attr, " "+TLDRSHAPrefix+" ")
+	if !found {
+		return "", fmt.Errorf("tldr opener carries no %s attribute", TLDRSHAPrefix)
+	}
+	if sha := strings.TrimSpace(rest); sha != "" {
+		return sha, nil
+	}
+	return "", fmt.Errorf("tldr opener carries an empty %s attribute", TLDRSHAPrefix)
+}
+
+// parseLegacyTLDR reads the SHA from the payload's first line when the opener
+// carries no SHA, covering both older shapes.
+func parseLegacyTLDR(content string) (sha, text string, err error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
 		return "", "", fmt.Errorf("tldr banner is empty")
 	}
 	lines := strings.SplitN(content, "\n", 2)
 	first := strings.TrimSpace(lines[0])
-	if !strings.HasPrefix(first, tldrSHAPrefix) {
-		return "", "", fmt.Errorf("tldr banner is not in the managed shape: first line must be %q, found %q — refusing to guess", tldrSHAPrefix, first)
+	s, ok := parseSHALineLegacy(first)
+	if !ok {
+		return "", "", fmt.Errorf("tldr banner is not in the managed shape: no %s in the opener and first line must carry it, found %q — refusing to guess", TLDRSHAPrefix, first)
 	}
-	sha = strings.TrimSpace(strings.TrimPrefix(first, tldrSHAPrefix))
-	if sha == "" {
-		return "", "", fmt.Errorf("tldr banner carries an empty %q value", tldrSHAPrefix)
-	}
+	rest := ""
 	if len(lines) == 2 {
-		text = strings.TrimSpace(lines[1])
+		rest = strings.TrimSpace(lines[1])
 	}
-	return sha, text, nil
+	return s, stripLabel(rest), nil
+}
+
+// stripLabel removes the managed TLDR label line from the start of the
+// summary, takes the blockquote prefix off what remains, and trims it — the
+// label and the quote marker are never reader-visible text.
+func stripLabel(text string) string {
+	text = strings.TrimSpace(text)
+	if text == TLDRLabel {
+		return ""
+	}
+	if rest, found := strings.CutPrefix(text, TLDRLabel+"\n"); found {
+		return strings.TrimSpace(unquoteLines(strings.TrimSpace(rest)))
+	}
+	return text
+}
+
+// parseSHALineLegacy extracts the SHA from one line in either older form:
+// standalone HTML comment or plain text. (The opener-carried form is handled
+// by parseOpenerSHA.)
+func parseSHALineLegacy(line string) (string, bool) {
+	if rest, found := strings.CutPrefix(line, tldrSHACommentOpen); found {
+		if !strings.HasSuffix(rest, " "+tldrSHACommentClose) {
+			return "", false
+		}
+		if sha := strings.TrimSpace(strings.TrimSuffix(rest, " "+tldrSHACommentClose)); sha != "" {
+			return sha, true
+		}
+		return "", false
+	}
+	if rest, found := strings.CutPrefix(line, tldrSHALegacyPrefix); found {
+		if sha := strings.TrimSpace(rest); sha != "" {
+			return sha, true
+		}
+		return "", false
+	}
+	return "", false
 }

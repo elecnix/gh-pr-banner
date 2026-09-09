@@ -30,7 +30,7 @@ func newListCommand(o *commonOptions) *cobra.Command {
 				o.emit(result{
 					Action: banner.ActionUnchanged,
 					Name:   "",
-					Repo:   o.owner + "/" + o.repoName,
+					Repo:   o.repoLabel(),
 					PR:     o.number,
 					URL:    o.url,
 					Names:  names,

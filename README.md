@@ -44,6 +44,22 @@ install is a no-op for most users.
 Every command targets a PR by `--pr NUMBER` (or derives it from the current
 branch when omitted) and `--repo OWNER/REPO` (or detects the current repo).
 
+Alternatively, pass `--file PATH` to target a **local file containing a PR
+body** instead of a PR. The same splice runs against the file's contents, and
+the file is rewritten in place. This lets a caller stamp the body _before_
+creating the PR — no body-edit event ever fires:
+
+```sh
+gh pr-banner tldr set --sha 1a2b3c4 --body "fixes the flaky retry loop" --file body.md
+gh pr create --body-file body.md   # banner already inside; no edit needed
+```
+
+`--file` is mutually exclusive with `--pr` and `--repo` (passing both is an
+error, and so is passing neither target). With `--file`, no repository or PR
+is resolved and no network call is made; `set`, `clear`, `get`, `present`,
+`list` and `tldr set`/`tldr get` all work, with the same idempotency and
+malformed-body guarantees as the PR target.
+
 ```sh
 # Add a banner (or update it in place if already present).
 gh pr-banner set do-not-merge --body "staging is red — do not merge" --pr 42
@@ -82,13 +98,26 @@ gh pr-banner tldr get --pr 42 --json   # {"banner": "...", "sha": "...", ...}
 The banner region looks like this in the body:
 
 ```md
-<!-- gh-pr-banner:tldr -->
+<!-- gh-pr-banner:tldr tldr-head-sha: 1a2b3c4 -->
 
-tldr-head-sha: 1a2b3c4
-fixes the flaky retry loop
+> **TLDR**
+> fixes the flaky retry loop
 
 <!-- /gh-pr-banner:tldr -->
 ```
+
+The label and the summary share one blockquote, so the TLDR reads as a single
+quoted block instead of a bold line above loose prose. The `> ` prefix is
+presentation: `tldr get` returns the summary exactly as its author wrote it.
+
+The SHA travels **inside the opening region comment** as an attribute, so it
+is invisible when the body renders — only the `> **TLDR**` label and the
+summary show. It stays machine-readable: `tldr get --json` and the parser
+both return it. Bodies written by earlier versions are still read back
+correctly — the SHA on a plain `tldr-head-sha:` first line, the SHA in a
+standalone `<!-- gh-pr-banner:tldr-head-sha: ... -->` comment, and a summary
+stamped before it was quoted — and re-stamping such a body normalizes it to
+the current shape in place; only new writes use the current form.
 
 Design rules, all deliberate:
 
@@ -100,20 +129,28 @@ Design rules, all deliberate:
   never a gate or a check.
 - **Never generated from the diff.** The summary is always written by a human;
   the command has no fallback that synthesizes one.
+- **A SHA that would break the opening comment is refused.** `--sha` is
+  caller-supplied and lands inside an HTML comment, so a value containing
+  `-->`, `<!--`, or a newline would end that comment early and leave the
+  region without a usable opener. `set` fails and writes nothing, rather than
+  rewriting what you passed. A summary needs no such rule: every summary line
+  is quoted, so one that mentions a marker stays ordinary text inside the
+  region.
 - **Clearing is shared with the generic commands.** `gh pr-banner clear tldr`
   and `gh pr-banner present tldr` work on the same region.
 
 ### Flags
 
-| Flag                    | Meaning                                                        |
-| ----------------------- | -------------------------------------------------------------- |
-| `-R, --repo OWNER/REPO` | target repo (default: current directory's repo)                |
-| `--pr NUMBER`           | PR number (default: PR for the current branch)                 |
-| `--at top\|bottom`      | where a _new_ region goes (`set` only; default top)            |
-| `--body TEXT`           | banner content (`set`; mutually exclusive with `--body-file`)  |
-| `-F, --body-file PATH`  | read banner content from a file                                |
-| `--dry-run`             | resolve and print what would change; **never** write to GitHub |
-| `--json`                | machine-readable output                                        |
+| Flag                    | Meaning                                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------------------- |
+| `-R, --repo OWNER/REPO` | target repo (default: current directory's repo)                                                           |
+| `--pr NUMBER`           | PR number (default: PR for the current branch)                                                            |
+| `--file PATH`           | operate on a local file instead of a PR (rewritten in place; mutually exclusive with `--pr` and `--repo`) |
+| `--at top\|bottom`      | where a _new_ region goes (`set` only; default top)                                                       |
+| `--body TEXT`           | banner content (`set`; mutually exclusive with `--body-file`)                                             |
+| `-F, --body-file PATH`  | read banner content from a file                                                                           |
+| `--dry-run`             | resolve and print what would change; **never** write, to GitHub or to `--file`                            |
+| `--json`                | machine-readable output                                                                                   |
 
 ## Semantics that matter
 
