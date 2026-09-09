@@ -131,7 +131,7 @@ func addCommonFlags(cmd *cobra.Command, o *commonOptions) {
 	cmd.PersistentFlags().IntVar(&o.pr, "pr", 0, "pull request number (default: PR for the current branch)")
 	cmd.PersistentFlags().StringVar(&o.file, "file", "", "operate on a local file containing the body instead of a PR (rewritten in place; mutually exclusive with --pr and --repo)")
 	cmd.PersistentFlags().BoolVar(&o.json, "json", false, "emit machine-readable JSON")
-	cmd.PersistentFlags().BoolVar(&o.dryRun, "dry-run", false, "resolve and print what would change without writing to GitHub")
+	cmd.PersistentFlags().BoolVar(&o.dryRun, "dry-run", false, "resolve and print what would change, writing neither to GitHub nor to --file")
 }
 
 // repoLabel is the human/JSON label for the target repository; empty in file

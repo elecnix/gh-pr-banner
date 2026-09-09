@@ -149,7 +149,7 @@ Design rules, all deliberate:
 | `--at top\|bottom`      | where a _new_ region goes (`set` only; default top)                                                       |
 | `--body TEXT`           | banner content (`set`; mutually exclusive with `--body-file`)                                             |
 | `-F, --body-file PATH`  | read banner content from a file                                                                           |
-| `--dry-run`             | resolve and print what would change; **never** write to GitHub                                            |
+| `--dry-run`             | resolve and print what would change; **never** write, to GitHub or to `--file`                            |
 | `--json`                | machine-readable output                                                                                   |
 
 ## Semantics that matter
