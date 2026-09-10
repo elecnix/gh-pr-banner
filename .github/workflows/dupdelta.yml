@@ -1,0 +1,26 @@
+name: dupdelta
+
+on:
+  pull_request:
+
+# The action only emits workflow-command annotations and a job summary; it
+# writes nothing through the API, so read access to the tree is all it needs.
+# That also means it works unchanged on a fork pull request, whose token is
+# read-only.
+permissions:
+  contents: read
+
+concurrency:
+  group: dupdelta-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dupdelta:
+    # See the note in ci.yml: this public extension can't reach the self-hosted
+    # `arc-runners` label, so it runs on ubuntu-latest.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the merge-base has to be reachable
+      - uses: elecnix/dupdelta@v0.2.0
