@@ -1,0 +1,36 @@
+# Flags a pull-request description that will render badly on GitHub: prose
+# hard-wrapped mid-sentence, list items broken onto a second line, collapsed
+# tables, and mermaid diagrams the mermaid parser rejects.
+#
+# Deliberately advisory — keep it out of the branch-protection ruleset. On the
+# action's calibration corpus it flags 11 of 94 human-authored bodies, all
+# already merged, so requiring it would redden the trunk over descriptions
+# nobody will rewrite. A red result asks the author to fix or dismiss.
+name: pr-body-format
+
+on:
+  pull_request:
+    branches: [main]
+    # `edited` re-runs the check once the author fixes the body — without it
+    # the original red result stands.
+    types: [opened, edited, reopened, synchronize]
+
+# The action reads the body through the API and writes nothing back, so read
+# access is all it needs. That also makes it work on a fork pull request,
+# whose token is read-only.
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: pr-body-format-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-body-format:
+    # See the note in ci.yml: this public extension can't reach the self-hosted
+    # `arc-runners` label, so it runs on ubuntu-latest.
+    runs-on: ubuntu-latest
+    steps:
+      # No actions/checkout is needed — the action reads the body via the API.
+      - uses: elecnix/gh-pr-body-action@v1.1.0
