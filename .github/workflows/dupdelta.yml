@@ -24,3 +24,17 @@ jobs:
         with:
           fetch-depth: 0 # the merge-base has to be reachable
       - uses: elecnix/dupdelta@v0.2.0
+        id: dupdelta
+
+      # A clean result and a scan that examined nothing are byte-identical
+      # otherwise: the same one-line summary, the same `findings=0`, the same
+      # empty stdout. Record the counts, so a scan that quietly stops looking
+      # at the Go tree shows up instead of staying green forever.
+      - name: Record how much was scanned
+        if: always() && steps.dupdelta.outputs.report != ''
+        env:
+          REPORT: ${{ steps.dupdelta.outputs.report }}
+        run: |
+          set -euo pipefail
+          jq -r '"Scanned \(.files_scanned) files, \(.units_considered) units."' "$REPORT" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
