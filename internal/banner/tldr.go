@@ -133,7 +133,7 @@ func validateTLDRSHA(sha string) error {
 		}
 	}
 	for _, r := range strings.TrimSpace(sha) {
-		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F') {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
 			return fmt.Errorf("tldr head sha %q is not hexadecimal — a shell substitution that never expanded looks like this; refusing to write it", sha)
 		}
 	}
