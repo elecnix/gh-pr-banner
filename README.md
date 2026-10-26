@@ -133,7 +133,8 @@ Design rules, all deliberate:
   caller-supplied and lands inside an HTML comment, so a value containing
   `-->`, `<!--`, or a newline would end that comment early and leave the
   region without a usable opener. `set` fails and writes nothing, rather than
-  rewriting what you passed. A summary needs no such rule: every summary line
+  rewriting what you passed. A SHA with a non-hex character is refused too (so `HEAD`, a branch or a tag name will not do, only a full or abbreviated commit sha):
+  a literal `$(git rev-parse HEAD)` means the shell never expanded it. A summary needs no such rule: every summary line
   is quoted, so one that mentions a marker stays ordinary text inside the
   region.
 - **Clearing is shared with the generic commands.** `gh pr-banner clear tldr`
