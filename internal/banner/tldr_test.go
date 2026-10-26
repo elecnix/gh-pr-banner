@@ -462,3 +462,17 @@ func TestTLDRSetRejectsNonHexSHA(t *testing.T) {
 		}
 	}
 }
+
+func TestTLDRSHAErrorShowsTheCheckedValueAndWhatIsAccepted(t *testing.T) {
+	_, err := TLDRApply("", "  HEAD  ", exampleText, OpSet, PlacementTop)
+	if err == nil {
+		t.Fatal("want an error for a ref name, got none")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "\"  HEAD  \"") || !strings.Contains(msg, "\"HEAD\"") {
+		t.Errorf("message must quote the trimmed value: %s", msg)
+	}
+	if !strings.Contains(msg, "full or abbreviated commit sha") {
+		t.Errorf("message must say what is accepted: %s", msg)
+	}
+}
