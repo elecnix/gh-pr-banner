@@ -448,3 +448,17 @@ func TestTLDRSummaryContainingOpeningMarkerStaysInsideTheRegion(t *testing.T) {
 		t.Fatalf("text = %q, want the summary verbatim", text)
 	}
 }
+
+func TestTLDRSetRejectsNonHexSHA(t *testing.T) {
+	// A shell that never expanded its substitution passes the literal text.
+	for _, sha := range []string{"$(git rev-parse HEAD)", "`git rev-parse HEAD`", "HEAD", "main", "xyz123", "abc 123"} {
+		if _, err := TLDRApply("", sha, exampleText, OpSet, PlacementTop); err == nil {
+			t.Errorf("sha %q: want an error, got none", sha)
+		}
+	}
+	for _, sha := range []string{exampleSHA, "abc123", "ABCDEF0"} {
+		if _, err := TLDRApply("", sha, exampleText, OpSet, PlacementTop); err != nil {
+			t.Errorf("sha %q: want no error, got %v", sha, err)
+		}
+	}
+}

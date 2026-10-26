@@ -132,6 +132,11 @@ func validateTLDRSHA(sha string) error {
 			return fmt.Errorf("tldr head sha %q contains %q, which would break the opening marker comment — refusing to write it", sha, bad)
 		}
 	}
+	for _, r := range strings.TrimSpace(sha) {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f' || r >= 'A' && r <= 'F') {
+			return fmt.Errorf("tldr head sha %q is not hexadecimal — a shell substitution that never expanded looks like this; refusing to write it", sha)
+		}
+	}
 	return nil
 }
 
