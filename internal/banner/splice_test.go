@@ -1,6 +1,7 @@
 package banner
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -282,4 +283,55 @@ func TestNameValidation(t *testing.T) {
 
 func countMarker(body, name string) int {
 	return strings.Count(body, openMarker(name))
+}
+
+func TestSpliceKeepsTheBodyTrailingNewlines(t *testing.T) {
+	// The newlines after the last line of the body are unmanaged content: a
+	// set or a clear writes them back exactly as it read them, whatever the
+	// operation and placement.
+	region := "<!-- gh-pr-banner:status -->\n\nold\n\n<!-- /gh-pr-banner:status -->"
+	cases := []struct {
+		name string
+		body string
+		op   Operation
+		at   Placement
+		want string
+	}{
+		{"insert at top", "prose", OpSet, PlacementTop,
+			"<!-- gh-pr-banner:status -->\n\nnew\n\n<!-- /gh-pr-banner:status -->\n\nprose"},
+		{"insert at bottom", "prose", OpSet, PlacementBottom,
+			"prose\n\n<!-- gh-pr-banner:status -->\n\nnew\n\n<!-- /gh-pr-banner:status -->"},
+		{"update in place", region + "\n\nprose", OpSet, PlacementTop,
+			"<!-- gh-pr-banner:status -->\n\nnew\n\n<!-- /gh-pr-banner:status -->\n\nprose"},
+		{"update a region at the end", "prose\n\n" + region, OpSet, PlacementTop,
+			"prose\n\n<!-- gh-pr-banner:status -->\n\nnew\n\n<!-- /gh-pr-banner:status -->"},
+		{"clear", region + "\n\nprose", OpClear, PlacementTop, "prose"},
+	}
+	for _, c := range cases {
+		for _, tail := range []string{"", "\n", "\n\n"} {
+			t.Run(fmt.Sprintf("%s/%q", c.name, tail), func(t *testing.T) {
+				want := c.want + tail
+				out, err := Apply(c.body+tail, "status", "new", c.op, c.at)
+				if err != nil {
+					t.Fatalf("apply: %v", err)
+				}
+				if out.Body != want {
+					t.Fatalf("body = %q, want %q", out.Body, want)
+				}
+			})
+		}
+	}
+}
+
+func TestClearOfTheWholeBodyLeavesItEmpty(t *testing.T) {
+	// A body that held only the region, plus a final newline, clears to an
+	// empty body rather than to a lone newline.
+	body := "<!-- gh-pr-banner:status -->\n\nold\n\n<!-- /gh-pr-banner:status -->\n"
+	out, err := Apply(body, "status", "", OpClear, PlacementTop)
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if out.Body != "" {
+		t.Fatalf("body = %q, want empty", out.Body)
+	}
 }

@@ -192,12 +192,17 @@ func blockLines(name, open, content string, hugOpener bool) []string {
 
 // joinLines reassembles lines into a body, stripping trailing blank lines that
 // the splice itself introduced so the result is tidy without touching any
-// unmanaged leading content.
-func joinLines(lines []string) string {
+// unmanaged leading content. It then appends tail, the newlines that ended the
+// body before the splice, so a body keeps its final newlines byte for byte. A
+// body left empty stays empty.
+func joinLines(lines []string, tail string) string {
 	for len(lines) > 0 && lines[len(lines)-1] == "" {
 		lines = lines[:len(lines)-1]
 	}
-	return strings.Join(lines, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + tail
 }
 
 // sameBody reports whether a and b differ only in trailing newlines — the only
@@ -269,7 +274,11 @@ var errUnchanged = fmt.Errorf("unchanged")
 // absent) and either returns errUnchanged (the region already holds what was
 // asked for) or the content and rendered lines the region should hold.
 func splice(currentBody, name string, build func(open, existing string) (string, []string, error), op Operation, at Placement) (Outcome, error) {
-	lines := strings.Split(currentBody, "\n")
+	// The newlines that end the body are not part of any line: set them aside
+	// and give them back unchanged when the body is reassembled.
+	trimmed := strings.TrimRight(currentBody, "\n")
+	tail := currentBody[len(trimmed):]
+	lines := strings.Split(trimmed, "\n")
 	ms, err := parseAndValidate(lines)
 	if err != nil {
 		return Outcome{}, err
@@ -293,7 +302,7 @@ func splice(currentBody, name string, build func(open, existing string) (string,
 		if present {
 			newLines := append(append([]string{}, lines[:o]...), block...)
 			newLines = append(newLines, lines[c+1:]...)
-			out := Outcome{Present: true, Banner: content, Body: joinLines(newLines)}
+			out := Outcome{Present: true, Banner: content, Body: joinLines(newLines, tail)}
 			if sameBody(currentBody, out.Body) {
 				out.Action = ActionUnchanged
 				out.Body = currentBody
@@ -321,7 +330,7 @@ func splice(currentBody, name string, build func(open, existing string) (string,
 		default:
 			return Outcome{}, fmt.Errorf("invalid placement %q (want %q or %q)", at, PlacementTop, PlacementBottom)
 		}
-		return Outcome{Action: ActionSet, Present: true, Banner: content, Body: joinLines(newLines)}, nil
+		return Outcome{Action: ActionSet, Present: true, Banner: content, Body: joinLines(newLines, tail)}, nil
 
 	case OpClear:
 		if !present {
@@ -337,7 +346,7 @@ func splice(currentBody, name string, build func(open, existing string) (string,
 		for len(newLines) > 0 && newLines[len(newLines)-1] == "" {
 			newLines = newLines[:len(newLines)-1]
 		}
-		return Outcome{Action: ActionCleared, Present: false, Body: joinLines(newLines)}, nil
+		return Outcome{Action: ActionCleared, Present: false, Body: joinLines(newLines, tail)}, nil
 	}
 	return Outcome{}, fmt.Errorf("unknown operation %v", op)
 }
