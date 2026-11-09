@@ -448,3 +448,118 @@ func TestTLDRSummaryContainingOpeningMarkerStaysInsideTheRegion(t *testing.T) {
 		t.Fatalf("text = %q, want the summary verbatim", text)
 	}
 }
+
+// rawTLDRContent returns the region content of the tldr banner in body, the
+// way a caller that copies the region out of a pull request body sees it: the
+// label line and the quoted summary, without the opener and closer.
+func rawTLDRContent(t *testing.T, body string) string {
+	t.Helper()
+	ok, _, content, err := LookupOpener(body, TLDRName)
+	if err != nil || !ok {
+		t.Fatalf("lookup: ok=%v err=%v", ok, err)
+	}
+	return content
+}
+
+// assertCleanTLDR checks that body holds exactly one label line, that the
+// reader returns want, and that the prose outside the region is intact.
+func assertCleanTLDR(t *testing.T, body, want, pre, post string) {
+	t.Helper()
+	if n := strings.Count(body, "**TLDR**"); n != 1 {
+		t.Fatalf("body holds %d TLDR labels, want 1:\n%s", n, body)
+	}
+	if strings.Contains(body, "> >") {
+		t.Fatalf("summary is quoted more than once:\n%s", body)
+	}
+	if _, text := readTLDR(t, body); text != want {
+		t.Fatalf("text = %q, want %q", text, want)
+	}
+	if !strings.HasPrefix(body, pre) || !strings.HasSuffix(body, post) {
+		t.Fatalf("prose outside the region changed:\n%s", body)
+	}
+}
+
+func TestTLDRSetWithRawRegionContentDoesNotNest(t *testing.T) {
+	// A caller that feeds the raw region content of a previous stamp (label
+	// line plus quoted summary) back into set gets the clean summary stamped
+	// once, not a label nested inside the label.
+	pre, post := "pre\n\n", "\n\npost prose"
+	body := pre + wantTLDRBlock + post
+	fed := rawTLDRContent(t, body)
+	out, err := TLDRApply(body, exampleSHA, fed, OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if out.Action != ActionUnchanged {
+		t.Fatalf("action = %s, want unchanged", out.Action)
+	}
+	if out.Body != body {
+		t.Fatalf("body changed:\n%s\nwant:\n%s", out.Body, body)
+	}
+	assertCleanTLDR(t, out.Body, exampleText, pre, post)
+}
+
+func TestTLDRSetWithRawRegionContentTwiceDoesNotNest(t *testing.T) {
+	// Feeding the region content back twice in a row, under a new SHA, still
+	// leaves one label and the clean summary.
+	pre, post := "pre\n\n", "\n\npost prose"
+	body := pre + wantTLDRBlock + post
+	const newSHA = "0123456789abcdef0123456789abcdef01234567"
+	for i := 0; i < 2; i++ {
+		out, err := TLDRApply(body, newSHA, rawTLDRContent(t, body), OpSet, PlacementTop)
+		if err != nil {
+			t.Fatalf("set %d: %v", i+1, err)
+		}
+		body = out.Body
+		assertCleanTLDR(t, body, exampleText, pre, post)
+	}
+	want := pre + strings.Replace(wantTLDRBlock, exampleSHA, newSHA, 1) + post
+	if body != want {
+		t.Fatalf("body:\n%s\nwant:\n%s", body, want)
+	}
+}
+
+func TestTLDRSetWithNestedRegionContentRepairsIt(t *testing.T) {
+	// Content already nested by an earlier feeding error (a label inside the
+	// label) stamps as one label and the clean summary.
+	fed := "> **TLDR**\n" +
+		"> > **TLDR**\n" +
+		"> > > **TLDR**\n" +
+		"> > > one line\n" +
+		"> > >\n" +
+		"> > > second line\n"
+	out, err := TLDRApply("", exampleSHA, fed, OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	assertCleanTLDR(t, out.Body, "one line\n\nsecond line", "", "")
+}
+
+func TestTLDRSetWithLabelOnlyIsEmptySummary(t *testing.T) {
+	// The raw content of an empty tldr is just the label: it stamps as an
+	// empty summary, not as a quoted label.
+	out, err := TLDRApply("", exampleSHA, TLDRLabel+"\n", OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	empty, err := TLDRApply("", exampleSHA, "", OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("set empty: %v", err)
+	}
+	if out.Body != empty.Body {
+		t.Fatalf("body:\n%s\nwant:\n%s", out.Body, empty.Body)
+	}
+}
+
+func TestTLDRSetKeepsQuotedSummaryWithoutLabel(t *testing.T) {
+	// Only text that starts with the managed label is normalized. A summary
+	// that quotes something on its own is the author's text and stays as is.
+	const quoted = "> quoted by the author\nplain line"
+	out, err := TLDRApply("", exampleSHA, quoted, OpSet, PlacementTop)
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if _, text := readTLDR(t, out.Body); text != quoted {
+		t.Fatalf("text = %q, want %q", text, quoted)
+	}
+}

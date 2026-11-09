@@ -158,7 +158,7 @@ func validateTLDRPayload(content string) error {
 // end-to-end (Action Unchanged, no network write); re-stamping replaces in
 // place, never appends.
 func TLDRApply(body, sha, text string, op Operation, at Placement) (Outcome, error) {
-	content := tldrBody(text)
+	content := tldrBody(normalizeTLDRInput(text))
 	if op == OpSet {
 		// Only a write needs a well-formed opener and payload; OpClear ignores
 		// both and removes the region whatever it holds.
@@ -244,6 +244,22 @@ func stripLabel(text string) string {
 	}
 	if rest, found := strings.CutPrefix(text, TLDRLabel+"\n"); found {
 		return strings.TrimSpace(unquoteLines(strings.TrimSpace(rest)))
+	}
+	return text
+}
+
+// normalizeTLDRInput turns summary input into the author's text before the
+// writer quotes it. A caller that copies a stamped region back into set passes
+// the label line and the quoted summary. Quoting that again would nest the
+// label inside the label, once more on every round trip. The reader's
+// stripLabel removes the label and one level of quoting, so applying it until
+// no label leads the text also unwinds a region that an earlier round trip
+// already nested. Text that does not start with the label is the author's
+// own and passes through unchanged.
+func normalizeTLDRInput(text string) string {
+	text = strings.TrimSpace(text)
+	for text == TLDRLabel || strings.HasPrefix(text, TLDRLabel+"\n") {
+		text = stripLabel(text)
 	}
 	return text
 }
