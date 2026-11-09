@@ -16,7 +16,7 @@
 // The SHA travels IN the opening region comment, so it is invisible when the
 // body renders while staying parseable by this package. The "> **TLDR**"
 // label is managed payload: the writer emits it, the parser strips it. The
-// SHA is stored, never enforced — freshness is computed by the READER (which
+// SHA is stored, never enforced on read — freshness is computed by the READER (which
 // compares changed-file sets and renders the banner marked stale when they
 // differ; a head that moved with an identical file set stays fresh). Nothing
 // here ever generates the summary from a diff: the whole value of a TLDR is
@@ -123,6 +123,12 @@ func unquoteLines(text string) string {
 // visible text and the region without a usable opener, and a newline would
 // splice arbitrary lines into the body. The tool refuses the write rather
 // than rewrite what the caller passed — same rule as a malformed body.
+//
+// The SHA must also be hexadecimal: a full or abbreviated commit sha, never a
+// ref name (HEAD, a branch, a tag) and never the text of a shell substitution
+// that did not expand. The banner records which commit the summary describes,
+// and a ref name moves while a sha does not. Readers still never gate on the
+// SHA (see the package comment); this check protects only what gets written.
 func validateTLDRSHA(sha string) error {
 	if strings.TrimSpace(sha) == "" {
 		return fmt.Errorf("tldr head sha is empty")
@@ -130,6 +136,12 @@ func validateTLDRSHA(sha string) error {
 	for _, bad := range []string{htmlCommentClose, htmlCommentOpen, "\n", "\r"} {
 		if strings.Contains(sha, bad) {
 			return fmt.Errorf("tldr head sha %q contains %q, which would break the opening marker comment — refusing to write it", sha, bad)
+		}
+	}
+	trimmed := strings.TrimSpace(sha)
+	for _, r := range trimmed {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
+			return fmt.Errorf("tldr head sha %q is not a full or abbreviated commit sha (hexadecimal only; a ref name such as HEAD or a tag is refused, and so is a shell substitution that never expanded) — refusing to write it", trimmed)
 		}
 	}
 	return nil

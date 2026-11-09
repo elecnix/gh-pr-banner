@@ -448,3 +448,31 @@ func TestTLDRSummaryContainingOpeningMarkerStaysInsideTheRegion(t *testing.T) {
 		t.Fatalf("text = %q, want the summary verbatim", text)
 	}
 }
+
+func TestTLDRSetRejectsNonHexSHA(t *testing.T) {
+	// A shell that never expanded its substitution passes the literal text.
+	for _, sha := range []string{"$(git rev-parse HEAD)", "`git rev-parse HEAD`", "HEAD", "main", "xyz123", "abc 123"} {
+		if _, err := TLDRApply("", sha, exampleText, OpSet, PlacementTop); err == nil {
+			t.Errorf("sha %q: want an error, got none", sha)
+		}
+	}
+	for _, sha := range []string{exampleSHA, "abc123", "ABCDEF0"} {
+		if _, err := TLDRApply("", sha, exampleText, OpSet, PlacementTop); err != nil {
+			t.Errorf("sha %q: want no error, got %v", sha, err)
+		}
+	}
+}
+
+func TestTLDRSHAErrorShowsTheCheckedValueAndWhatIsAccepted(t *testing.T) {
+	_, err := TLDRApply("", "  HEAD  ", exampleText, OpSet, PlacementTop)
+	if err == nil {
+		t.Fatal("want an error for a ref name, got none")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "\"  HEAD  \"") || !strings.Contains(msg, "\"HEAD\"") {
+		t.Errorf("message must quote the trimmed value: %s", msg)
+	}
+	if !strings.Contains(msg, "full or abbreviated commit sha") {
+		t.Errorf("message must say what is accepted: %s", msg)
+	}
+}
