@@ -54,11 +54,15 @@ go test -buildvcs=false ./...
 Read [`.github/workflows/release.yml`](.github/workflows/release.yml) before
 cutting a release. Rules that matter:
 
-1. **A tag-push run uses the workflow file at the tagged commit**, not the one
+1. **A release run uses the workflow file at the tagged commit**, not the one
    on `main`. Merge a workflow fix first, then tag.
-2. **Tags are lightweight and match `v*`.** Pushing the tag triggers the release:
+2. **The workflow runs on `release: published`, not on a tag push.** A tag
+   push trigger raced the release trigger on asset upload and left a release
+   without binaries (#5). Tags are lightweight and match `v*`. Push the tag,
+   then publish the release on it, which starts the workflow:
    ```sh
    git tag v1.0.0 <sha> && git push origin v1.0.0
+   gh release create v1.0.0 --verify-tag
    ```
 3. **`workflow_dispatch` does not work for releases** (the tag is derived from
    `github.ref_name`, which is the branch name on a manual dispatch).
