@@ -157,11 +157,19 @@ func validateTLDRPayload(content string) error {
 // is part of the payload. Re-stamping the same summary + SHA is idempotent
 // end-to-end (Action Unchanged, no network write); re-stamping replaces in
 // place, never appends.
+//
+// A set refuses a body that already carries a visible TLDR label outside the
+// region. The label is managed payload, so a second copy in the author's prose
+// renders the same shape twice, and the tool never rewrites prose it did not
+// write.
 func TLDRApply(body, sha, text string, op Operation, at Placement) (Outcome, error) {
 	content := tldrBody(normalizeTLDRInput(text))
 	if op == OpSet {
 		// Only a write needs a well-formed opener and payload; OpClear ignores
 		// both and removes the region whatever it holds.
+		if line := strayTLDRLabel(body); line != 0 {
+			return Outcome{}, fmt.Errorf("the body already carries a %q label at line %d, outside the managed region; the banner is the body's only TLDR, so delete that label and its quote, then run set again", TLDRLabel, line)
+		}
 		if err := validateTLDRSHA(sha); err != nil {
 			return Outcome{}, err
 		}
@@ -170,6 +178,72 @@ func TLDRApply(body, sha, text string, op Operation, at Placement) (Outcome, err
 		}
 	}
 	return ApplyOpener(body, TLDRName, TLDROpener(sha), content, op, at)
+}
+
+// strayTLDRLabel returns the 1-based line of a visible TLDR label outside the
+// managed tldr region, or 0 when the body carries none. Lines inside the
+// region are the managed label itself, and a label inside a fenced code block
+// is example text: neither counts.
+func strayTLDRLabel(body string) int {
+	lines := strings.Split(body, "\n")
+	inRegion, fence := false, ""
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// A fence makes everything to its close example text: a marker inside
+		// one must not open or close the region, or a fenced copy of the opener
+		// would hide a real stray label further down.
+		if fence != "" {
+			if strings.HasPrefix(trimmed, fence) {
+				fence = ""
+			}
+			continue
+		}
+		if marker, ok := fenceOpen(trimmed); ok {
+			fence = marker
+			continue
+		}
+		if name, ok := markerName(line, openPrefix, markerSfx); ok && name == TLDRName {
+			inRegion = true
+			continue
+		}
+		if name, ok := markerName(line, closePrefix, markerSfx); ok && name == TLDRName {
+			inRegion = false
+			continue
+		}
+		if inRegion {
+			continue
+		}
+		if isTLDRLabelLine(trimmed) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+// fenceOpen reports the fence marker a line opens, when it opens one: three or
+// more backticks or tildes, and the run's exact length.
+func fenceOpen(line string) (string, bool) {
+	for _, c := range []string{"`", "~"} {
+		if !strings.HasPrefix(line, strings.Repeat(c, 3)) {
+			continue
+		}
+		n := 0
+		for n < len(line) && string(line[n]) == c {
+			n++
+		}
+		return strings.Repeat(c, n), true
+	}
+	return "", false
+}
+
+// isTLDRLabelLine reports whether a trimmed line is the visible label: a
+// blockquote marker, then nothing but the bold label. Whitespace between the
+// two is tolerated, as it is in the rendered label's variants.
+func isTLDRLabelLine(line string) bool {
+	if !strings.HasPrefix(line, ">") {
+		return false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(line, ">")) == "**TLDR**"
 }
 
 // ParseTLDR extracts the SHA and the author-written summary from TLDR banner
