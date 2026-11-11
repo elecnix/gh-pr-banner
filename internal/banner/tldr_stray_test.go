@@ -93,3 +93,24 @@ func TestTLDRClearStillWorksBesideAStrayLabel(t *testing.T) {
 		t.Fatalf("clear damaged the hand-written text:\n%s", out.Body)
 	}
 }
+
+func TestTLDRSetSeesAStrayLabelAfterAFencedOpener(t *testing.T) {
+	// A fenced example of the whole region is documentation, not a region: it
+	// must not hide a hand-written label that follows it.
+	body := "Prose.\n\n" +
+		"```md\n" +
+		"<!-- gh-pr-banner:tldr tldr-head-sha: abc123 -->\n" +
+		"> **TLDR**\n" +
+		"> example\n" +
+		"<!-- /gh-pr-banner:tldr -->\n" +
+		"```\n\n" +
+		"> **TLDR**\n" +
+		"> typed by hand after the example\n"
+	out, err := TLDRApply(body, exampleSHA, "one line", OpSet, PlacementTop)
+	if err == nil {
+		t.Fatalf("set over a fenced opener followed by a real label succeeded; body:\n%s", out.Body)
+	}
+	if !strings.Contains(err.Error(), "line 10") {
+		t.Fatalf("error does not name the stray label's line: %v", err)
+	}
+}

@@ -188,6 +188,20 @@ func strayTLDRLabel(body string) int {
 	lines := strings.Split(body, "\n")
 	inRegion, fence := false, ""
 	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// A fence makes everything to its close example text: a marker inside
+		// one must not open or close the region, or a fenced copy of the opener
+		// would hide a real stray label further down.
+		if fence != "" {
+			if strings.HasPrefix(trimmed, fence) {
+				fence = ""
+			}
+			continue
+		}
+		if marker, ok := fenceOpen(trimmed); ok {
+			fence = marker
+			continue
+		}
 		if name, ok := markerName(line, openPrefix, markerSfx); ok && name == TLDRName {
 			inRegion = true
 			continue
@@ -197,17 +211,6 @@ func strayTLDRLabel(body string) int {
 			continue
 		}
 		if inRegion {
-			continue
-		}
-		trimmed := strings.TrimSpace(line)
-		if fence != "" {
-			if strings.HasPrefix(trimmed, fence) {
-				fence = ""
-			}
-			continue
-		}
-		if marker, ok := fenceOpen(trimmed); ok {
-			fence = marker
 			continue
 		}
 		if isTLDRLabelLine(trimmed) {
