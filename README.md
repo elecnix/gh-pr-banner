@@ -136,6 +136,12 @@ Design rules, all deliberate:
   rewriting what you passed. A summary needs no such rule: every summary line
   is quoted, so one that mentions a marker stays ordinary text inside the
   region.
+- **A second, hand-typed label is refused, not rewritten.** The
+  `> **TLDR**` line is managed payload: `set` writes it and `get` strips it.
+  A copy typed outside the region renders the shape twice, so `set` fails,
+  names the line, and changes nothing. A label inside a fenced code block is
+  example text and is left alone. `clear` still works beside a stray label, so
+  the banner can always be removed.
 - **Clearing is shared with the generic commands.** `gh pr-banner clear tldr`
   and `gh pr-banner present tldr` work on the same region.
 
